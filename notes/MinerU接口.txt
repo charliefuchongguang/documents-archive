@@ -1,0 +1,20 @@
+MinerU 接口
+
+接口：
+POST http://tool.bjzcc.cn:60080/api/mineru/upload
+
+参数：
+- user: 区分用户唯一标识（名称、账号、ID等）
+- file: 一个上传控件名为“file”所上传的pdf文件，可同时上传多个
+
+结果示例：
+{
+  "code": "OK",
+  "msg": "成功",
+  "data": [
+    {
+      "name": "联想服务器工作站京东自营官方旗舰店.pdf",
+      "url": "http://tool.bjzcc.cn:60080/res/tester/8691e99d9329a4f25f7b094452603130/result.md"
+    }
+  ]
+}
