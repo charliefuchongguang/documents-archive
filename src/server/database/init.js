@@ -40,6 +40,8 @@ function initDatabase() {
         created_by TEXT,
         created_by_name TEXT,
         synced_at TEXT,
+        segments TEXT DEFAULT '[]',
+        procurement_type TEXT DEFAULT 'F',
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now'))
       );
@@ -54,6 +56,7 @@ function initDatabase() {
         status TEXT DEFAULT 'pending',
         error_msg TEXT,
         nas_path TEXT,
+        segment_no INTEGER DEFAULT 0,
         created_at TEXT DEFAULT (datetime('now')),
         updated_at TEXT DEFAULT (datetime('now')),
         FOREIGN KEY (project_id) REFERENCES projects(id)
@@ -76,9 +79,26 @@ function initDatabase() {
         role TEXT DEFAULT 'user',
         created_at TEXT DEFAULT (datetime('now'))
       );
+
+      CREATE TABLE IF NOT EXISTS project_no_seq (
+        year TEXT NOT NULL,
+        current_seq INTEGER DEFAULT 0,
+        PRIMARY KEY (year)
+      );
     `;
 
     db.exec(createTables);
+
+    // 为已有表添加新列（列已存在时会报错，捕获忽略）
+    const alterStatements = [
+      'ALTER TABLE projects ADD COLUMN segments TEXT DEFAULT \'[]\'',
+      'ALTER TABLE projects ADD COLUMN procurement_type TEXT DEFAULT \'F\'',
+      'ALTER TABLE files ADD COLUMN segment_no INTEGER DEFAULT 0'
+    ];
+    for (const sql of alterStatements) {
+      try { db.exec(sql); } catch (e) { /* 列已存在，忽略 */ }
+    }
+
     console.log('[数据库] 初始化完成，数据库路径:', DB_PATH);
 
     // 检查是否存在管理员，没有则创建默认管理员

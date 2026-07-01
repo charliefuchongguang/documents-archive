@@ -4,6 +4,7 @@
 const express = require('express');
 const router = express.Router();
 const projectController = require('../controllers/projectController');
+const { requireAuth } = require('../middleware/auth');
 
 // 获取项目列表
 router.get('/', projectController.listProjects);
@@ -26,7 +27,13 @@ router.get('/:id/merged-data', projectController.getMergedData);
 // 保存项目合并后的表单数据
 router.post('/:id/merged-data', projectController.saveMergedData);
 
-// 删除项目（级联删除关联数据）
-router.delete('/:id', projectController.deleteProject);
+// 保存项目标段配置
+router.put('/:id/segments', requireAuth, projectController.updateSegments);
+
+// 获取项目标段配置
+router.get('/:id/segments', requireAuth, projectController.getSegments);
+
+// 保存采购内容类型
+router.put('/:id/procurement-type', requireAuth, projectController.updateProcurementType);
 
 module.exports = router;

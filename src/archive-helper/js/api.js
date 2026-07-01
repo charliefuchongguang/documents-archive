@@ -56,5 +56,36 @@ window.API = {
    */
   async changePassword(oldPassword, newPassword) {
     return Http.put('/auth/change-password', { oldPassword, newPassword });
+  },
+
+  // ==========================================
+  // 归档提交相关 API
+  // ==========================================
+
+  /**
+   * 提交项目归档
+   * @param {string} projectId - 项目 ID
+   * @returns {Promise<Object>}
+   */
+  async submitProject(projectId, body = {}) {
+    return Http.post('/submit/project/' + projectId, body);
+  },
+
+  /**
+   * 获取归档列表（管理员）
+   * @param {number} [page=1] - 页码
+   * @param {number} [pageSize=20] - 每页条数
+   * @returns {Promise<Object>} { list, total, page, pageSize }
+   */
+  async getArchives(page = 1, pageSize = 20) {
+    return Http.get('/submit/archives?page=' + page + '&pageSize=' + pageSize);
+  },
+
+  /**
+   * 获取全部归档数据用于导出（管理员）
+   * @returns {Promise<Array>}
+   */
+  async exportArchivesData() {
+    return Http.get('/submit/export-excel');
   }
 };

@@ -50,16 +50,18 @@ window.Extract = {
 - totalInvestment: 项目总投资，返回纯数字（万元）
 - tenderUnit: 招标人名称
 - contactInfo: 联系人及电话
+- segments: 标段名称列表（数组），从招标文件中提取所有标段名称。如果文档中提到了多个标段（如"第一标段"、"第二标段"等），请全部提取并返回数组。如果只有单个标段或没有标段信息，返回空数组[]。
 
 规则：
-1. 如果某个字段在文档中未找到，返回 null
+1. 如果某个字段在文档中未找到，返回 null（segments 字段返回 []）
 2. 日期统一返回 YYYY-MM-DD 格式
 3. 金额统一返回纯数字（万元），不要带单位
 4. 枚举字段必须严格从给定选项中选择，不要自创
-5. 只返回 JSON，不要任何解释文字
+5. segments 必须是字符串数组，每个元素是一个标段的完整名称
+6. 只返回 JSON，不要任何解释文字
 
 请只返回 JSON，格式如下：
-{"projectNo":"...","projectType":"...",...}
+{"projectNo":"...","projectType":"...","segments":["第一标段","第二标段",...],...}
 
 文档内容：
 {{content}}`,
@@ -76,6 +78,7 @@ window.Extract = {
 - winNoticeDate: 中标通知书时间，返回 YYYY-MM-DD 格式
 - sealUnit: 盖章单位，必须从以下选项中严格选择：["招标人","招标代理","招标人+招标代理","招标人+招标代理+交易中心","招标人+交易中心","招标代理+交易中心","其他"]
 - tenderUnit: 招标人名称
+- segmentName: 标段名称（如"第一标段"、"一标段"、"A标段"等，如果文档中没有标段信息则返回空字符串）
 
 规则：
 1. 如果某个字段在文档中未找到，返回 null
@@ -91,13 +94,15 @@ window.Extract = {
 {{content}}`,
 
     /**
-     * 中标公示 — 提取2个字段
+     * 中标公示 — 提取4个字段
      */
     win_public: `你是专业的招标信息提取助手。请从以下中标公示的 Markdown 内容中提取指定字段，并以严格的 JSON 格式返回。
 
 需要提取的字段：
+- projectName: 招标项目名称
 - publicDate: 公示发布时间，返回 YYYY-MM-DD 格式
 - winUnit: 中标单位名称
+- segmentName: 标段名称（如果文档中提及标段信息则提取，否则返回空字符串）
 
 规则：
 1. 如果某个字段在文档中未找到，返回 null
@@ -165,9 +170,9 @@ window.Extract = {
   /** 各类文档可提取的字段列表 */
   DOC_TYPE_FIELDS: {
     tender_notice: ['announceDate', 'announceMedia'],
-    tender_doc: ['projectNo', 'projectType', 'province', 'industry', 'projectName', 'tenderType', 'tenderMethod', 'orgMode', 'buildType', 'mileage', 'roadLevel', 'projectOverview', 'totalInvestment', 'tenderUnit', 'contactInfo'],
-    win_notice: ['projectName', 'winUnit', 'winAmount', 'winNoticeDate', 'sealUnit', 'tenderUnit'],
-    win_public: ['publicDate', 'winUnit'],
+    tender_doc: ['projectNo', 'projectType', 'province', 'industry', 'projectName', 'tenderType', 'tenderMethod', 'orgMode', 'buildType', 'mileage', 'roadLevel', 'projectOverview', 'totalInvestment', 'tenderUnit', 'contactInfo', 'segments'],
+    win_notice: ['projectName', 'winUnit', 'winAmount', 'winNoticeDate', 'sealUnit', 'tenderUnit', 'segmentName'],
+    win_public: ['projectName', 'publicDate', 'winUnit', 'segmentName'],
     evaluation: ['projectManager', 'techManager', 'otherMembers', 'evalDate'],
     contract: ['contractName', 'entrustDate', 'projectManager', 'techManager', 'otherMembers', 'entrustAmount', 'contactInfo']
   },
@@ -209,8 +214,11 @@ window.Extract = {
 
   /**
    * 合并项目所有已提取的文档数据，检测冲突并保存
+   * 支持多文件（同docType多个文件）和标段识别
    * @param {string} projectId - 项目ID
    * @returns {Promise<Object>} 合并后的完整字段数据（含冲突标记）
+   *   返回格式：{ formData: {...}, fieldMeta: {...}, segmentData: { 1: {...}, 2: {...} } }
+   *   向后兼容：旧调用方仍可使用原逻辑
    */
   async mergeExtractedData(projectId) {
     // 1. 从 DB 获取项目所有已成功提取的文件
@@ -228,12 +236,66 @@ window.Extract = {
       return pa - pb;
     });
 
-    // 3. 遍历 30 个字段，收集各来源中的值
+    // 3. 检测是否为多标段项目（存在 segmentNo > 0 的中标通知书或中标公示）
+    const winNoticeFiles = extractedFiles.filter(f => f.docType === 'win_notice');
+    const winPublicFiles = extractedFiles.filter(f => f.docType === 'win_public');
+    const segmentFiles = [...winNoticeFiles, ...winPublicFiles];
+    const hasMultipleSegments = segmentFiles.some(f => f.segmentNo && f.segmentNo > 0);
+
+    // 4. 收集各标段的标段特有字段（来自 win_notice + win_public）
+    const segmentData = {};
+    if (hasMultipleSegments) {
+      // 标段特有字段列表（扩展：加入 projectName 和 publicDate）
+      const segFields = ['projectName', 'winAmount', 'winUnit', 'winNoticeDate', 'sealUnit', 'publicDate'];
+
+      for (const file of segmentFiles) {
+        const segNo = file.segmentNo || 0;
+        if (segNo === 0) continue; // 跳过无标段标记的
+        if (!segmentData[segNo]) {
+          segmentData[segNo] = {};
+        }
+        const extracted = file.extracted;
+        for (const field of segFields) {
+          if (extracted && extracted[field] !== null && extracted[field] !== undefined && String(extracted[field]).trim() !== '') {
+            // 只填充尚未有值的字段（优先级：先到先得，按 SOURCE_PRIORITY 已排序）
+            if (!segmentData[segNo][field]) {
+              segmentData[segNo][field] = extracted[field];
+            }
+          }
+        }
+        // 同时保存来源信息
+        segmentData[segNo]._source = file.docType;
+        segmentData[segNo]._segmentNo = segNo;
+      }
+
+      // 用 tender_doc 的通用值回填标段中缺失的 buildType / projectName
+      const tenderDocFiles = extractedFiles.filter(f => f.docType === 'tender_doc');
+      for (const tdFile of tenderDocFiles) {
+        const tdExtracted = tdFile.extracted;
+        if (!tdExtracted) continue;
+        for (const segNo of Object.keys(segmentData)) {
+          for (const fallbackField of ['projectName']) {
+            if (!segmentData[segNo][fallbackField] &&
+                tdExtracted[fallbackField] !== null &&
+                tdExtracted[fallbackField] !== undefined &&
+                String(tdExtracted[fallbackField]).trim() !== '') {
+              segmentData[segNo][fallbackField] = tdExtracted[fallbackField];
+            }
+          }
+        }
+      }
+    }
+
+    // 5. 遍历所有字段，收集各来源中的值（支持同docType多文件合并）
     const merged = {};
     const plainValues = {}; // 纯值版本，用于保存到 DB
 
     for (const fieldMeta of window.Utils.FIELDS) {
       const fieldKey = fieldMeta.key;
+      if (fieldKey === 'segmentName') continue; // 标段名称不合并到表单
+      if (fieldKey === 'segments') continue; // segments数组字段不合并到表单
+      // 多标段时，projectName 也是标段特有字段，不进入全局合并
+      if (hasMultipleSegments && fieldKey === 'projectName') continue;
       const sources = []; // 收集该字段在各来源中的值
 
       for (const file of extractedFiles) {
@@ -247,11 +309,25 @@ window.Extract = {
           continue;
         }
 
-        sources.push({ docType, value: rawValue });
+        // 多标段时，中标通知书和中标公示的标段特有字段不进入全局合并
+        // 它们已经收集到 segmentData 中
+        if (hasMultipleSegments && (docType === 'win_notice' || docType === 'win_public')) {
+          const segFields = ['projectName', 'winAmount', 'winUnit', 'winNoticeDate', 'sealUnit', 'publicDate'];
+          if (segFields.includes(fieldKey)) {
+            continue; // 多标段时这些字段按标段分离存储
+          }
+        }
+
+        // 标注来源（含段号信息）
+        const segNo = file.segmentNo || 0;
+        const sourceLabel = (hasMultipleSegments && segNo > 0)
+          ? `${docType}#${segNo}`
+          : docType;
+
+        sources.push({ docType, value: rawValue, segmentNo: segNo, sourceLabel });
       }
 
       if (sources.length === 0) {
-        // 没有任何来源提取到该字段
         merged[fieldKey] = {
           value: null,
           source: null,
@@ -263,11 +339,10 @@ window.Extract = {
       }
 
       if (sources.length === 1) {
-        // 只有一个来源有值，直接使用
         const src = sources[0];
         merged[fieldKey] = {
           value: src.value,
-          source: src.docType,
+          source: src.sourceLabel || src.docType,
           conflict: false,
           sources: sources
         };
@@ -288,32 +363,45 @@ window.Extract = {
       }
 
       if (!hasConflict) {
-        // 多个来源值相同，使用优先级最高的值（排序后第一个）
         const src = sources[0];
         merged[fieldKey] = {
           value: src.value,
-          source: src.docType,
+          source: src.sourceLabel || src.docType,
           conflict: false,
           sources: sources
         };
         plainValues[fieldKey] = src.value;
       } else {
-        // 存在冲突，取优先级最高的值，但标记冲突
+        // 存在冲突，保留所有来源值
+        const allValues = sources.map(s => ({
+          value: s.value,
+          source: s.sourceLabel || s.docType,
+          segmentNo: s.segmentNo
+        }));
         const src = sources[0];
         merged[fieldKey] = {
           value: src.value,
-          source: src.docType,
+          source: src.sourceLabel || src.docType,
           conflict: true,
-          sources: sources
+          sources: sources,
+          allValues: allValues  // 冲突时保留全部来源值
         };
         plainValues[fieldKey] = src.value;
       }
     }
 
-    // 4. 将纯值版本保存到 DB
+    // 6. 将纯值版本保存到 DB
     await window.DB.saveMergedData(projectId, plainValues);
 
-    return merged;
+    // 7. 构造返回结果
+    const result = { formData: merged, fieldMeta: {} };
+
+    // 仅在有多标段中标通知书时附加 segmentData
+    if (hasMultipleSegments && Object.keys(segmentData).length > 0) {
+      result.segmentData = segmentData;
+    }
+
+    return result;
   },
 
   /**

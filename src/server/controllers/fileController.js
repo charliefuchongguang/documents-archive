@@ -18,7 +18,8 @@ module.exports = {
    */
   async upload(req, res) {
     try {
-      const { projectId, docType } = req.body;
+      const { projectId, docType, segmentNo } = req.body;
+      const segNo = parseInt(segmentNo, 10) || 0; // 默认0=共享文件
 
       if (!req.file) {
         return res.status(400).json({ error: '未上传文件' });
@@ -42,16 +43,16 @@ module.exports = {
       if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
       fs.writeFileSync(path.join(TEMP_DIR, `${fileId}${ext}`), fileBuffer);
 
-      // 创建文件记录（状态为 pending）
+      // 创建文件记录（状态为 pending，写入 segment_no）
       dao.createFile({
         id: fileId,
         projectId,
         docType,
         fileName,
         mdContent: null,
-        nasPath: null
+        nasPath: null,
+        segmentNo: segNo
       });
-      // createFile 默认 status='pending'（已从 'uploaded' 改为 'pending'）
 
       // 加入处理队列
       const taskQueue = require('../services/taskQueue');
@@ -64,6 +65,64 @@ module.exports = {
       });
     } catch (error) {
       console.error('[File Upload] 失败:', error.message);
+      res.status(500).json({ error: error.message });
+    }
+  },
+
+  /**
+   * POST /api/files/upload-batch
+   * 批量上传文件（同一 projectId + docType + segmentNo），逐个处理
+   * Body: multipart/form-data，字段名 files，附加 projectId、docType、segmentNo
+   */
+  async batchUpload(req, res) {
+    try {
+      const { projectId, docType, segmentNo } = req.body;
+      const segNo = parseInt(segmentNo, 10) || 0;
+
+      if (!req.files || req.files.length === 0) {
+        return res.status(400).json({ error: '未上传文件' });
+      }
+      if (!projectId || !docType) {
+        return res.status(400).json({ error: '缺少 projectId 或 docType 参数' });
+      }
+
+      const project = dao.getProject(projectId);
+      if (!project) {
+        return res.status(404).json({ error: '项目不存在' });
+      }
+
+      const taskQueue = require('../services/taskQueue');
+      const results = [];
+
+      for (const file of req.files) {
+        const fileId = crypto.randomUUID();
+        const fileName = file.originalname;
+        const ext = (path.extname(fileName) || '.pdf').toLowerCase();
+
+        if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR, { recursive: true });
+        fs.writeFileSync(path.join(TEMP_DIR, `${fileId}${ext}`), file.buffer);
+
+        dao.createFile({
+          id: fileId,
+          projectId,
+          docType,
+          fileName,
+          mdContent: null,
+          nasPath: null,
+          segmentNo: segNo
+        });
+
+        taskQueue.enqueue(fileId);
+        results.push(dao.getFile(fileId));
+      }
+
+      res.status(201).json({
+        success: true,
+        files: results,
+        message: `已上传 ${results.length} 个文件，正在排队处理`
+      });
+    } catch (error) {
+      console.error('[Batch Upload] 失败:', error.message);
       res.status(500).json({ error: error.message });
     }
   },
@@ -151,6 +210,21 @@ module.exports = {
       res.json({ success: true });
     } catch (error) {
       console.error('[删除文件] 失败:', error.message);
+      res.status(500).json({ error: error.message });
+    }
+  },
+
+  /**
+   * PUT /api/files/:id/segment-no
+   * 更新文件标段号
+   */
+  updateSegmentNo(req, res) {
+    try {
+      const { id } = req.params;
+      const { segmentNo } = req.body;
+      dao.updateFileSegmentNo(id, segmentNo || 0);
+      res.json({ success: true });
+    } catch (error) {
       res.status(500).json({ error: error.message });
     }
   }

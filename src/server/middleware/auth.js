@@ -45,4 +45,14 @@ function requireAuth(req, res, next) {
   }
 }
 
-module.exports = { requireAuth };
+/**
+ * 管理员权限中间件
+ */
+function requireAdmin(req, res, next) {
+  if (!req.user || req.user.role !== 'admin') {
+    return res.status(403).json({ error: '仅管理员可访问此功能' });
+  }
+  next();
+}
+
+module.exports = { requireAuth, requireAdmin };

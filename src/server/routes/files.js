@@ -52,6 +52,9 @@ const upload = multer({
 // 上传文件（异步队列处理）
 router.post('/upload', upload.single('file'), fileController.upload);
 
+// 批量上传文件（同一 projectId + docType + segmentNo）
+router.post('/upload-batch', upload.array('files', 10), fileController.batchUpload);
+
 // 获取项目文件状态（含队列状态）
 router.get('/status/:projectId', fileController.getStatus);
 
@@ -60,6 +63,9 @@ router.post('/:id/retry', fileController.retry);
 
 // 更新文件信息（提取结果、状态等）
 router.put('/:id', fileController.update);
+
+// 更新文件标段号
+router.put('/:id/segment-no', fileController.updateSegmentNo);
 
 // 删除文件
 router.delete('/:id', fileController.delete);

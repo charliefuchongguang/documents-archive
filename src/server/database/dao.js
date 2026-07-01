@@ -116,15 +116,15 @@ function deleteProject(id) {
 
 /**
  * 添加文件记录
- * @param {Object} params - { id, projectId, docType, fileName, mdContent, nasPath }
+ * @param {Object} params - { id, projectId, docType, fileName, mdContent, nasPath, segmentNo }
  * @returns {Object} 新创建的文件记录
  */
-function createFile({ id, projectId, docType, fileName, mdContent, nasPath }) {
+function createFile({ id, projectId, docType, fileName, mdContent, nasPath, segmentNo = 0 }) {
   const db = getDb();
   db.prepare(`
-    INSERT INTO files (id, project_id, doc_type, file_name, md_content, status, nas_path)
-    VALUES (?, ?, ?, ?, ?, 'pending', ?)
-  `).run(id, projectId, docType, fileName, mdContent, nasPath);
+    INSERT INTO files (id, project_id, doc_type, segment_no, file_name, md_content, status, nas_path)
+    VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
+  `).run(id, projectId, docType, segmentNo, fileName, mdContent, nasPath);
   return getFile(id);
 }
 
@@ -185,6 +185,17 @@ function updateFile(id, data) {
 function deleteFile(id) {
   const db = getDb();
   db.prepare('DELETE FROM files WHERE id = ?').run(id);
+}
+
+/**
+ * 更新文件标段号
+ * @param {string} fileId - 文件 ID
+ * @param {number} segmentNo - 标段编号
+ */
+function updateFileSegmentNo(fileId, segmentNo) {
+  const db = getDb();
+  const stmt = db.prepare('UPDATE files SET segment_no = ? WHERE id = ?');
+  return stmt.run(segmentNo, fileId);
 }
 
 // ==================== 合并数据操作 ====================
@@ -292,10 +303,57 @@ function updateUserPassword(id, passwordHash) {
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, id);
 }
 
+// ==================== 项目标段与采购类型操作 ====================
+
+/**
+ * 更新项目标段信息
+ * @param {string} projectId - 项目 ID
+ * @param {Array|string} segments - 标段数组（会自动序列化）
+ */
+function updateProjectSegments(projectId, segments) {
+  const db = getDb();
+  const segStr = typeof segments === 'string' ? segments : JSON.stringify(segments);
+  db.prepare(`UPDATE projects SET segments = ?, updated_at = datetime('now') WHERE id = ?`).run(segStr, projectId);
+}
+
+/**
+ * 获取项目标段信息
+ * @param {string} projectId - 项目 ID
+ * @returns {Array} 标段列表
+ */
+function getProjectSegments(projectId) {
+  const db = getDb();
+  const row = db.prepare('SELECT segments FROM projects WHERE id = ?').get(projectId);
+  if (!row || !row.segments) return [];
+  try { return JSON.parse(row.segments); } catch { return []; }
+}
+
+/**
+ * 更新项目采购方式
+ * @param {string} projectId - 项目 ID
+ * @param {string} type - 采购方式代码
+ */
+function updateProjectProcurementType(projectId, type) {
+  const db = getDb();
+  db.prepare(`UPDATE projects SET procurement_type = ?, updated_at = datetime('now') WHERE id = ?`).run(type, projectId);
+}
+
+/**
+ * 获取项目采购方式
+ * @param {string} projectId - 项目 ID
+ * @returns {string} 采购方式代码
+ */
+function getProjectProcurementType(projectId) {
+  const db = getDb();
+  const row = db.prepare('SELECT procurement_type FROM projects WHERE id = ?').get(projectId);
+  return row ? (row.procurement_type || 'F') : 'F';
+}
+
 module.exports = {
   getDb,
   createProject, getProject, getProjects, updateProject, deleteProject,
-  createFile, getFile, getFilesByProject, updateFile, deleteFile,
+  createFile, getFile, getFilesByProject, updateFile, deleteFile, updateFileSegmentNo,
   saveMergedData, getMergedData,
-  createUser, getUserByUsername, getUserById, getUsers, deleteUser, updateUserPassword
+  createUser, getUserByUsername, getUserById, getUsers, deleteUser, updateUserPassword,
+  updateProjectSegments, getProjectSegments, updateProjectProcurementType, getProjectProcurementType
 };

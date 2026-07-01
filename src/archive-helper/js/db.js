@@ -20,6 +20,7 @@ function _mapProject(p) {
     syncedAt: p.synced_at || p.syncedAt,
     createdBy: p.created_by || p.createdBy,
     createdByName: p.created_by_name || p.createdByName,
+    procurementType: p.procurement_type || p.procurementType || 'F',
   };
 }
 
@@ -38,6 +39,7 @@ function _mapFile(f) {
     content: f.md_content || f.content,
     extracted: f.extracted_data !== undefined ? f.extracted_data : f.extracted,
     nasPath: f.nas_path || f.nasPath,
+    segmentNo: f.segment_no !== undefined ? f.segment_no : (f.segmentNo || 0),
     errorMsg: f.error_msg || f.errorMsg,
     createdAt: f.created_at || f.createdAt,
     updatedAt: f.updated_at || f.updatedAt,
@@ -138,13 +140,15 @@ window.DB = {
    * @param {string} projectId - 项目ID
    * @param {string} docType - 文档类型
    * @param {File} file - PDF 文件对象
+   * @param {number} [segmentNo=0] - 标段编号（默认0表示不分标段）
    * @returns {Promise<Object>} 上传结果
    */
-  async uploadFile(projectId, docType, file) {
+  async uploadFile(projectId, docType, file, segmentNo = 0) {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('projectId', projectId);
     formData.append('docType', docType);
+    formData.append('segmentNo', segmentNo);
     const result = await Http.upload('/files/upload', formData);
     // 映射返回的 file 对象
     if (result.file) {
@@ -244,6 +248,15 @@ window.DB = {
   async getFile(projectId, docType) {
     const files = await this.getFiles(projectId);
     return files.find(f => f.docType === docType) || null;
+  },
+
+  /**
+   * 更新文件标段号
+   * @param {string} fileId - 文件ID
+   * @param {number} segmentNo - 标段编号
+   */
+  async updateFileSegmentNo(fileId, segmentNo) {
+    return Http.put(`/files/${fileId}/segment-no`, { segmentNo });
   },
 
   // ==================== 合并数据相关操作 ====================

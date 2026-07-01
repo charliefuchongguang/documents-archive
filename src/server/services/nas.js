@@ -8,7 +8,6 @@
  */
 const { createClient } = require('webdav');
 const config = require('../config');
-const path = require('path');
 
 class NasService {
   constructor() {
@@ -96,16 +95,16 @@ class NasService {
 
   /**
    * 构建归档文件的 NAS 存储路径
-   * @param {string} projectNo - 项目编号
-   * @param {string} docType - 文档类型（如 "招标文件"）
+   * 固定路径结构：{basePath}/工程类/招标类/{year}年/{fileName}
+   * @param {string} _projectNo - 项目编号（保留参数兼容性，不再使用）
+   * @param {string} _docType - 文档类型（保留参数兼容性，不再使用）
    * @param {string} fileName - 原始文件名
    * @returns {string} NAS 上的完整路径
    */
-  buildArchivePath(projectNo, docType, fileName) {
+  buildArchivePath(_projectNo, _docType, fileName) {
     const year = new Date().getFullYear().toString();
     const basePath = config.nas.basePath || '/归档文件';
-    const ext = path.extname(fileName);
-    return `${basePath}/${year}/${projectNo}/${docType}${ext}`;
+    return `${basePath}/工程类/招标类/${year}年/${fileName}`;
   }
 }
 

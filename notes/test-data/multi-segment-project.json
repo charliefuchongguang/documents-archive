@@ -1,0 +1,89 @@
+{
+  "description": "多标段项目测试数据 - 验证 extracted_data 按 segment_no 分组收集",
+  "project": {
+    "id": "test-multi-seg-001",
+    "name": "测试多标段项目",
+    "status": "active",
+    "segments": [
+      { "name": "第一标段", "description": "标段一描述" },
+      { "name": "第二标段", "description": "标段二描述" }
+    ],
+    "procurement_type": "F"
+  },
+  "files": [
+    {
+      "id": "file-1",
+      "projectId": "test-multi-seg-001",
+      "docType": "中标通知书",
+      "segmentNo": 0,
+      "fileName": "中标通知书.pdf",
+      "extracted_data": {
+        "projectCode": "XYZ-2024-001",
+        "purchaser": "新疆维吾尔自治区公路事业发展中心",
+        "agency": "新疆新咨工程咨询有限公司",
+        "signingDate": "2025-03-15",
+        "budgetAmount": "3934.5117万元"
+      }
+    },
+    {
+      "id": "file-2",
+      "projectId": "test-multi-seg-001",
+      "docType": "中标公示",
+      "segmentNo": 1,
+      "fileName": "中标公示_标段1.pdf",
+      "extracted_data": {
+        "winCandidate": "中交第二航务工程局有限公司",
+        "winAmount": "124812603.35元",
+        "winDate": "2025-03-01",
+        "winOrg": "中交第二航务工程局有限公司",
+        "winNoticeMedia": "新疆建设工程交易网",
+        "bidBondAmount": "500000.0元",
+        "bidBondPayee": "中交第二航务工程局有限公司",
+        "constructionPeriod": "730日历天",
+        "qualityStandard": "标段工程交工验收的质量评定：合格。标段工程竣工验收的质量评定：合格及以上。",
+        "safetyGoal": "严格执行有关安全生产的法律法规和规范性文件,不发生安全生产事故",
+        "pmName": "刘洋",
+        "pmMajor": "公路工程管理",
+        "pmCertNo": "鄂1422018201902961"
+      }
+    },
+    {
+      "id": "file-3",
+      "projectId": "test-multi-seg-001",
+      "docType": "中标公示",
+      "segmentNo": 2,
+      "fileName": "中标公示_标段2.pdf",
+      "extracted_data": {
+        "winCandidate": "中交路桥建设有限公司",
+        "winAmount": "103350833.21元",
+        "winDate": "2025-03-01",
+        "winOrg": "中交路桥建设有限公司",
+        "winNoticeMedia": "新疆建设工程交易网",
+        "bidBondAmount": "500000.0元",
+        "bidBondPayee": "中交路桥建设有限公司",
+        "constructionPeriod": "730日历天",
+        "qualityStandard": "标段工程交工验收的质量评定：合格。标段工程竣工验收的质量评定：合格及以上。",
+        "safetyGoal": "严格执行有关安全生产的法律法规和规范性文件,不发生安全生产事故",
+        "pmName": "李平",
+        "pmMajor": "公路工程管理",
+        "pmCertNo": "京1112018201902123"
+      }
+    }
+  ],
+  "expected": {
+    "globalFields": ["projectCode", "purchaser", "agency", "signingDate", "budgetAmount"],
+    "segment1Only": {
+      "winCandidate": "中交第二航务工程局有限公司",
+      "winAmount": "124812603.35元",
+      "pmName": "刘洋",
+      "pmCertNo": "鄂1422018201902961"
+    },
+    "segment2Only": {
+      "winCandidate": "中交路桥建设有限公司",
+      "winAmount": "103350833.21元",
+      "pmName": "李平",
+      "pmCertNo": "京1112018201902123"
+    },
+    "sharedFields": ["winDate", "winNoticeMedia", "bidBondAmount", "constructionPeriod", "qualityStandard", "safetyGoal"]
+  }
+}

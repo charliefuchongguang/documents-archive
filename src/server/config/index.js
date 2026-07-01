@@ -1,7 +1,7 @@
 /**
  * 配置模块 - 读取 .env 环境变量，导出结构化配置对象
  */
-require('dotenv').config();
+require('dotenv').config({ path: require('path').join(__dirname, '..', '.env') });
 
 module.exports = {
   // 服务配置

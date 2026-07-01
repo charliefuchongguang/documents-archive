@@ -115,6 +115,11 @@ function saveMergedData(req, res) {
     const existing = dao.getProject(req.params.id);
     if (!existing) return res.status(404).json({ error: '项目不存在' });
 
+    // 已归档项目数据不允许修改
+    if (existing.status === 'archived') {
+      return res.status(409).json({ error: '已归档项目数据无法修改' });
+    }
+
     const { formData, conflicts } = req.body;
     if (!formData) return res.status(400).json({ error: '缺少 formData 参数' });
 
@@ -131,18 +136,62 @@ function saveMergedData(req, res) {
 }
 
 /**
- * 删除项目（级联删除关联数据）
- * DELETE /api/projects/:id
+ * 更新标段配置
+ * PUT /api/projects/:id/segments
+ * Body: { segments: [{name: "第一标段"}, {name: "第二标段"}] }
  */
-function deleteProject(req, res) {
+function updateSegments(req, res) {
   try {
-    const existing = dao.getProject(req.params.id);
+    const { id } = req.params;
+    const existing = dao.getProject(id);
     if (!existing) return res.status(404).json({ error: '项目不存在' });
 
-    dao.deleteProject(req.params.id);
+    const { segments } = req.body;
+    if (!Array.isArray(segments)) {
+      return res.status(400).json({ error: 'segments 必须为数组' });
+    }
+    dao.updateProjectSegments(id, segments);
     res.json({ success: true });
   } catch (error) {
-    console.error('[删除项目] 失败:', error.message);
+    console.error('[更新标段] 失败:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+}
+
+/**
+ * 获取项目标段配置
+ * GET /api/projects/:id/segments
+ */
+function getSegments(req, res) {
+  try {
+    const { id } = req.params;
+    const segments = dao.getProjectSegments(id);
+    res.json({ success: true, segments });
+  } catch (error) {
+    console.error('[获取标段] 失败:', error.message);
+    res.status(500).json({ error: error.message });
+  }
+}
+
+/**
+ * 更新采购内容类型
+ * PUT /api/projects/:id/procurement-type
+ * Body: { procurementType: 'F' | 'G' | 'H' }
+ */
+function updateProcurementType(req, res) {
+  try {
+    const { id } = req.params;
+    const existing = dao.getProject(id);
+    if (!existing) return res.status(404).json({ error: '项目不存在' });
+
+    const { procurementType } = req.body;
+    if (!procurementType) {
+      return res.status(400).json({ error: '缺少 procurementType 参数' });
+    }
+    dao.updateProjectProcurementType(id, procurementType);
+    res.json({ success: true });
+  } catch (error) {
+    console.error('[更新采购类型] 失败:', error.message);
     res.status(500).json({ error: error.message });
   }
 }
@@ -155,5 +204,7 @@ module.exports = {
   listProjectFiles,
   getMergedData,
   saveMergedData,
-  deleteProject,
+  updateSegments,
+  getSegments,
+  updateProcurementType,
 };

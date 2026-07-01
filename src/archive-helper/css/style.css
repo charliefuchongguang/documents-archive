@@ -793,6 +793,15 @@ a:hover {
   margin-left: 12px;
 }
 
+/* 标段切换 Tab */
+.segment-tabs .el-tabs__item {
+  font-size: 13px;
+}
+
+.segment-tabs .el-tabs__header {
+  margin-bottom: 0;
+}
+
 /* 表单容器 */
 .review-form {
   max-width: 900px;
