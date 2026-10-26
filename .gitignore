@@ -36,6 +36,7 @@ coverage/
 *.db-journal
 *.db-wal
 *.db-shm
+*.db.bak-*
 *.sqlite
 *.sqlite3
 
@@ -47,6 +48,17 @@ temp/*
 archive-helper/temp/*
 src/server/temp/*
 !src/server/temp/.gitkeep
+
+# ============ Python ============
+__pycache__/
+*.pyc
+
+# ============ Local-only snapshots / secrets ============
+.workbuddy/
+doc-archive_20260907/
+src.zip
+notes/DeepSeek.txt
+logs/
 
 # ============ Qoder / AI tool ============
 .qoder/

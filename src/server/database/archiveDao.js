@@ -3,6 +3,8 @@
  * 通过 init.js 的 getDatabase() 获取数据库连接，自行负责建表与序号维护
  */
 const { getDatabase } = require('./init');
+const { buildArchiveSearchCondition } = require('../utils/archiveSearchQuery');
+const { nowCN } = require('../utils/time');
 
 // 建表标志，确保只在进程生命周期内执行一次
 let tableEnsured = false;
@@ -31,6 +33,9 @@ function getDb() {
           segment_no INTEGER DEFAULT 0,
           segment_name TEXT DEFAULT '',
           project_no TEXT DEFAULT '',
+          template_code TEXT DEFAULT '',
+          template_version TEXT DEFAULT '',
+          archive_ref TEXT DEFAULT '',
           submitted_by TEXT,
           submitted_by_name TEXT,
           submitted_at TEXT DEFAULT (datetime('now')),
@@ -38,8 +43,8 @@ function getDb() {
         )
       `);
       db.exec(`
-        INSERT OR IGNORE INTO archives_new (seq_no, project_id, project_name, form_data, segment_no, segment_name, project_no, submitted_by, submitted_by_name, submitted_at)
-        SELECT seq_no, project_id, project_name, form_data, COALESCE(segment_no,0), COALESCE(segment_name,''), COALESCE(project_no,''), submitted_by, submitted_by_name, submitted_at
+        INSERT OR IGNORE INTO archives_new (seq_no, project_id, project_name, form_data, segment_no, segment_name, project_no, template_code, template_version, archive_ref, submitted_by, submitted_by_name, submitted_at)
+        SELECT seq_no, project_id, project_name, form_data, COALESCE(segment_no,0), COALESCE(segment_name,''), COALESCE(project_no,''), '', '', '', submitted_by, submitted_by_name, submitted_at
         FROM archives
       `);
       db.exec(`DROP TABLE archives`);
@@ -56,6 +61,9 @@ function getDb() {
         segment_no INTEGER DEFAULT 0,
         segment_name TEXT DEFAULT '',
         project_no TEXT DEFAULT '',
+        template_code TEXT DEFAULT '',
+        template_version TEXT DEFAULT '',
+        archive_ref TEXT DEFAULT '',
         submitted_by TEXT,
         submitted_by_name TEXT,
         submitted_at TEXT DEFAULT (datetime('now')),
@@ -77,7 +85,10 @@ function getDb() {
     const alterStatements = [
       "ALTER TABLE archives ADD COLUMN segment_no INTEGER DEFAULT 0",
       "ALTER TABLE archives ADD COLUMN segment_name TEXT DEFAULT ''",
-      "ALTER TABLE archives ADD COLUMN project_no TEXT DEFAULT ''"
+      "ALTER TABLE archives ADD COLUMN project_no TEXT DEFAULT ''",
+      "ALTER TABLE archives ADD COLUMN template_code TEXT DEFAULT ''",
+      "ALTER TABLE archives ADD COLUMN template_version TEXT DEFAULT ''",
+      "ALTER TABLE archives ADD COLUMN archive_ref TEXT DEFAULT ''"
     ];
     for (const sql of alterStatements) {
       try { db.exec(sql); } catch (e) { /* 列已存在，忽略 */ }
@@ -104,12 +115,12 @@ function generateSeqNo() {
  * 生成项目编号
  * 格式：ZEC-Z{year}{procurementType}-{seq}，seq 三位补零
  * @param {string} year - 年份，如 '2026'
- * @param {string} procurementType - 采购方式代码，默认 'F'
+ * @param {string} procurementType - 采购方式代码，默认 'G'
  * @returns {string} 项目编号
  */
 function generateProjectNo(year, procurementType) {
   const db = getDb();
-  const type = procurementType || 'F';
+  const type = procurementType || 'G';
   const incrementSeq = db.transaction(() => {
     const row = db.prepare('SELECT current_seq FROM project_no_seq WHERE year = ?').get(year);
     let seq;
@@ -133,7 +144,19 @@ function generateProjectNo(year, procurementType) {
  * @param {Object} params - { projectId, projectName, formData, submittedBy, submittedByName, segmentNo, segmentName, projectNo }
  * @returns {Object} 新创建的归档记录
  */
-function archiveProject({ projectId, projectName, formData, submittedBy, submittedByName, segmentNo = 0, segmentName = '', projectNo = '' }) {
+function archiveProject({
+  projectId,
+  projectName,
+  formData,
+  submittedBy,
+  submittedByName,
+  segmentNo = 0,
+  segmentName = '',
+  projectNo = '',
+  templateCode = '',
+  templateVersion = '',
+  archiveRef = ''
+}) {
   const db = getDb();
   const existing = db.prepare('SELECT seq_no FROM archives WHERE project_id = ? AND segment_no = ?').get(projectId, segmentNo);
   if (existing) {
@@ -142,9 +165,13 @@ function archiveProject({ projectId, projectName, formData, submittedBy, submitt
   const seqNo = generateSeqNo();
   const formDataStr = typeof formData === 'object' ? JSON.stringify(formData) : formData;
   db.prepare(`
-    INSERT INTO archives (seq_no, project_id, project_name, form_data, segment_no, segment_name, project_no, submitted_by, submitted_by_name)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(seqNo, projectId, projectName, formDataStr, segmentNo, segmentName, projectNo, submittedBy, submittedByName);
+    INSERT INTO archives (seq_no, project_id, project_name, form_data, segment_no, segment_name, project_no,
+      template_code, template_version, archive_ref, submitted_by, submitted_by_name, submitted_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    seqNo, projectId, projectName, formDataStr, segmentNo, segmentName, projectNo,
+    templateCode || '', templateVersion || '', archiveRef || '', submittedBy, submittedByName, nowCN()
+  );
   return db.prepare('SELECT * FROM archives WHERE project_id = ? AND segment_no = ?').get(projectId, segmentNo);
 }
 
@@ -153,7 +180,18 @@ function archiveProject({ projectId, projectName, formData, submittedBy, submitt
  * @param {Object} params - { projectId, projectName, segments, formDataArray, projectNo, submittedBy, submittedByName }
  * @returns {Array} 归档结果列表
  */
-function archiveProjectBatch({ projectId, projectName, segments, formDataArray, projectNo, submittedBy, submittedByName }) {
+function archiveProjectBatch({
+  projectId,
+  projectName,
+  segments,
+  formDataArray,
+  projectNo,
+  templateCode = '',
+  templateVersion = '',
+  archiveRefBuilder = null,
+  submittedBy,
+  submittedByName
+}) {
   const db = getDb();
   const insertMany = db.transaction((segs) => {
     const results = [];
@@ -165,10 +203,17 @@ function archiveProjectBatch({ projectId, projectName, segments, formDataArray, 
       const formData = formDataArray && formDataArray[i] ? formDataArray[i] : {};
       const formDataStr = typeof formData === 'object' ? JSON.stringify(formData) : formData;
       const segProjectName = `${projectName}${seg.name}`;
+      const archiveRef = typeof archiveRefBuilder === 'function'
+        ? (archiveRefBuilder(i + 1, seg) || '')
+        : '';
       db.prepare(`
-        INSERT INTO archives (seq_no, project_id, project_name, form_data, segment_no, segment_name, project_no, submitted_by, submitted_by_name)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(seqNo, projectId, segProjectName, formDataStr, i + 1, seg.name, projectNo, submittedBy, submittedByName);
+        INSERT INTO archives (seq_no, project_id, project_name, form_data, segment_no, segment_name, project_no,
+          template_code, template_version, archive_ref, submitted_by, submitted_by_name, submitted_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        seqNo, projectId, segProjectName, formDataStr, i + 1, seg.name, projectNo,
+        templateCode || '', templateVersion || '', archiveRef, submittedBy, submittedByName, nowCN()
+      );
       results.push({ seqNo, segmentNo: i + 1, segmentName: seg.name });
     }
     return results;
@@ -191,15 +236,66 @@ function getArchive(projectId) {
 }
 
 /**
+ * 获取项目的全部归档记录（多标段）
+ * @param {string} projectId
+ * @returns {Array}
+ */
+function getArchivesByProject(projectId) {
+  const db = getDb();
+  return db.prepare('SELECT * FROM archives WHERE project_id = ? ORDER BY segment_no ASC').all(projectId);
+}
+
+/**
+ * 按项目 ID + 标段号获取归档记录
+ * @param {string} projectId
+ * @param {number} segmentNo
+ * @returns {Object|undefined}
+ */
+function getArchiveByProjectAndSegment(projectId, segmentNo) {
+  const db = getDb();
+  const row = db.prepare(
+    'SELECT * FROM archives WHERE project_id = ? AND segment_no = ?'
+  ).get(projectId, segmentNo);
+  if (row && row.form_data) {
+    try { row.form_data = JSON.parse(row.form_data); } catch {}
+  }
+  return row;
+}
+
+/**
  * 分页获取归档列表
- * @param {Object} options - { page, pageSize }
+ * @param {Object} options - { page, pageSize, search, regions }
  * @returns {Object} { items, total, page, pageSize }
  */
-function getArchives({ page = 1, pageSize = 20 } = {}) {
+function getArchives({ page = 1, pageSize = 50, search = '', regions = [] } = {}) {
   const db = getDb();
   const offset = (page - 1) * pageSize;
-  const total = db.prepare('SELECT COUNT(*) as count FROM archives').get().count;
-  const items = db.prepare('SELECT * FROM archives ORDER BY seq_no ASC LIMIT ? OFFSET ?').all(pageSize, offset);
+  const conditions = [];
+  const params = [];
+
+  if (search) {
+    const searchCondition = buildArchiveSearchCondition(search);
+    if (searchCondition) {
+      conditions.push(searchCondition.condition);
+      params.push(...searchCondition.params);
+    }
+  }
+
+  if (Array.isArray(regions) && regions.length > 0) {
+    conditions.push(`p.region IN (${regions.map(() => '?').join(', ')})`);
+    params.push(...regions);
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const fromClause = 'FROM archives a LEFT JOIN projects p ON a.project_id = p.id';
+
+  const total = db.prepare(`SELECT COUNT(*) as count ${fromClause} ${whereClause}`).get(...params).count;
+  const items = db.prepare(
+    `SELECT a.*, p.status AS project_status, p.paper_reviewed_at AS paper_reviewed_at,
+            p.paper_reviewed_by_name AS paper_reviewed_by_name
+     ${fromClause} ${whereClause} ORDER BY a.seq_no ASC LIMIT ? OFFSET ?`
+  ).all(...params, pageSize, offset);
+
   items.forEach(item => {
     if (item.form_data) {
       try { item.form_data = JSON.parse(item.form_data); } catch {}
@@ -214,7 +310,12 @@ function getArchives({ page = 1, pageSize = 20 } = {}) {
  */
 function getAllArchivesForExport() {
   const db = getDb();
-  const rows = db.prepare('SELECT * FROM archives ORDER BY seq_no ASC').all();
+  const rows = db.prepare(`
+    SELECT a.*, p.status AS project_status
+    FROM archives a
+    LEFT JOIN projects p ON p.id = a.project_id
+    ORDER BY a.seq_no ASC
+  `).all();
   return rows.map(row => {
     const data = row.form_data
       ? (typeof row.form_data === 'string' ? JSON.parse(row.form_data) : row.form_data)
@@ -223,6 +324,10 @@ function getAllArchivesForExport() {
       seq_no: row.seq_no,
       project_name: row.project_name,
       project_no: row.project_no || '',
+      project_status: row.project_status || '',
+      template_code: row.template_code || '',
+      template_version: row.template_version || '',
+      archive_ref: row.archive_ref || '',
       segment_no: row.segment_no || 0,
       segment_name: row.segment_name || '',
       submitted_by_name: row.submitted_by_name,
@@ -250,6 +355,8 @@ module.exports = {
   archiveProject,
   archiveProjectBatch,
   getArchive,
+  getArchivesByProject,
+  getArchiveByProjectAndSegment,
   getArchives,
   getAllArchivesForExport,
   removeArchive,

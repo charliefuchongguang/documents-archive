@@ -71,7 +71,7 @@ window.Export = {
 
     // 构建表头：序号 | 项目编号 | 项目名称 | 标段名称 | [form_data 字段] | 提交人 | 提交时间
     // 排除与表头固定列重复或内部使用的字段
-    const excludeKeys = ['segmentName'];
+    const excludeKeys = ['segmentName', 'projectNo'];
     const knownKeys = Utils.FIELDS.map(f => f.key).filter(k => !excludeKeys.includes(k));
     const extraKeys = [];
     parsedRows.forEach(({ formObj }) => {
@@ -87,7 +87,8 @@ window.Export = {
     const labelMap = {};
     Utils.FIELDS.forEach(f => { labelMap[f.key] = f.label; });
 
-    const headers = ['序号', '项目编号', '项目名称', '标段名称', ...allKeys.map(k => labelMap[k] || k), '提交人', '提交时间'];
+    const headers = ['序号', '项目编号', '项目名称', '状态', '标段名称', ...allKeys.map(k => labelMap[k] || k), '提交人', '提交时间'];
+    const statusLabels = { pending_paper: '待纸质核对', archived: '已归档' };
 
     // 2. 构建数据行
     const rows = parsedRows.map(({ record, formObj }, idx) => {
@@ -95,6 +96,7 @@ window.Export = {
         record.seq_no || (idx + 1),
         record.project_no || '',
         record.project_name || '',
+        statusLabels[record.project_status] || '已归档',
         record.segment_name || ''
       ];
       allKeys.forEach(k => row.push(formObj[k] || ''));
@@ -112,9 +114,63 @@ window.Export = {
     XLSX.utils.book_append_sheet(wb, ws, '归档汇总');
 
     // 4. 生成文件名并下载
-    const date = dayjs().format('YYYYMMDD');
+const date = dayjs().format('YYYYMMDD');
     const filename = `归档汇总表_${date}.xlsx`;
+
     XLSX.writeFile(wb, filename);
+  },
+
+  /**
+   * 导出合同台账
+   * @param {Array} contracts
+   */
+  exportContractsToExcel(contracts) {
+    if (!contracts || contracts.length === 0) {
+      ElementPlus.ElMessage.warning('没有可导出的合同数据');
+      return;
+    }
+
+    const headers = [
+      '序号', '合同名称', '对方企业名称', '合同性质', '合同内容',
+      '项目负责人', '技术负责人', '合同日期', '代理费金额（万元）',
+      '应贴花金额（元）', '已贴花金额（元）', '份数', '存档日期',
+      '汇总纳税', '统一社会信用代码', '大合同', '付款类',
+      '所属大合同', '子合同数', '关联项目数', '关联项目',
+      '合同金额（万元）', '来源'
+    ];
+
+    const rows = contracts.map((c) => [
+      c.seqNo || '',
+      c.name || '',
+      c.counterparty || '',
+      c.natureRaw || '',
+      c.contractContent || '',
+      c.projectManager || '',
+      c.techManager || '',
+      c.contractDateRaw || c.contractDate || '',
+      c.agencyFee == null ? '' : c.agencyFee,
+      c.stampTaxDue == null ? '' : c.stampTaxDue,
+      c.stampTaxPaid == null ? '' : c.stampTaxPaid,
+      c.copies == null ? '' : c.copies,
+      c.archiveDate || '',
+      c.isConsolidatedTax ? '是' : '否',
+      c.creditCodeRaw || '',
+      c.isAnchor ? '是' : '否',
+      c.isPayment ? '是' : '否',
+      c.parentContractId || '',
+      c.childCount || 0,
+      c.projectCount || 0,
+      (c.projectNames || []).join('、'),
+      c.contractAmount == null ? '' : c.contractAmount,
+      c.source === 'legacy' ? '历史导入' : '手工新增'
+    ]);
+
+    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+    ws['!cols'] = headers.map((h, i) => ({ wch: i === 0 ? 8 : Math.max(String(h).length * 2, 14) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '合同台账');
+    const date = dayjs().format('YYYYMMDD');
+    XLSX.writeFile(wb, `合同台账_${date}.xlsx`);
   }
 
 };

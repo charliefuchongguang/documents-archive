@@ -27,6 +27,9 @@ window.Http = {
    */
   clearToken() {
     localStorage.removeItem(this.TOKEN_KEY);
+    if (window.HomeFilterStorage) {
+      window.HomeFilterStorage.clearAll();
+    }
   },
 
   /**
@@ -64,8 +67,9 @@ window.Http = {
     if (!response.ok) {
       // 解析后端错误信息
       let errorMsg = '';
+      let errData = null;
       try {
-        const errData = await response.json();
+        errData = await response.json();
         errorMsg = errData.error || errData.message || response.statusText;
       } catch {
         errorMsg = response.statusText;
@@ -83,7 +87,10 @@ window.Http = {
         }
       }
 
-      throw new Error(errorMsg);
+      const err = new Error(errorMsg);
+      err.status = response.status;
+      err.data = errData;
+      throw err;
     }
 
     return response.json();
@@ -125,21 +132,154 @@ window.Http = {
 
   /**
    * POST 上传文件（FormData）
+   * 使用 XHR 以获得真实的已上传字节进度；网络失败标记为可重试
+   * @param {string} path
+   * @param {FormData} formData
+   * @param {(loaded: number, total: number) => void} [onProgress]
+   * @returns {Promise<Object>}
    */
-  async upload(path, formData) {
-    return this.request(path, {
-      method: 'POST',
-      body: formData
-      // 不设置 Content-Type，让浏览器自动设置 multipart boundary
+  upload(path, formData, onProgress) {
+    return new Promise((resolve, reject) => {
+      const url = this.BASE_URL + path;
+      const token = this.getToken();
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', url);
+      if (token) {
+        xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+      }
+
+      if (typeof onProgress === 'function') {
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            onProgress(event.loaded, event.total);
+          }
+        };
+      }
+
+      xhr.onload = () => {
+        let data = null;
+        try {
+          data = JSON.parse(xhr.responseText);
+        } catch {
+          data = null;
+        }
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(data);
+          return;
+        }
+        // 401：登录过期（与 request 保持一致）
+        if (xhr.status === 401 && token) {
+          this.clearToken();
+          this.redirectToLogin();
+        }
+        const errorMsg = (data && (data.error || data.message)) || xhr.statusText || `HTTP ${xhr.status}`;
+        const err = new Error(errorMsg);
+        err.status = xhr.status;
+        err.data = data;
+        reject(err);
+      };
+      xhr.onerror = () => {
+        const err = new Error('网络连接失败，请检查网络后重试');
+        err.network = true;
+        err.retryable = true;
+        reject(err);
+      };
+      xhr.ontimeout = () => {
+        const err = new Error('上传超时，请重试');
+        err.network = true;
+        err.retryable = true;
+        reject(err);
+      };
+      xhr.onabort = () => {
+        const err = new Error('上传已中断');
+        err.network = true;
+        err.retryable = true;
+        reject(err);
+      };
+
+      xhr.send(formData);
     });
+  },
+
+  /**
+   * POST 请求并返回 Blob（用于文件下载）
+   * @param {string} path
+   * @param {Object} [data]
+   * @returns {Promise<{ blob: Blob, filename: string }>}
+   */
+  async postBlob(path, data) {
+    const url = this.BASE_URL + path;
+    const headers = { 'Content-Type': 'application/json' };
+    const token = this.getToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(data || {})
+    });
+
+    if (!response.ok) {
+      let errorMsg = response.statusText;
+      try {
+        const errData = await response.json();
+        errorMsg = errData.error || errData.message || errorMsg;
+      } catch {
+        // 非 JSON 错误响应
+      }
+      if (response.status === 401 && token) {
+        this.clearToken();
+        this.redirectToLogin();
+        throw new Error('登录已过期，请重新登录');
+      }
+      throw new Error(errorMsg);
+    }
+
+    const contentType = response.headers.get('Content-Type') || '';
+    if (contentType.includes('application/json')) {
+      const json = await response.json();
+      return { json, blob: null, filename: '' };
+    }
+
+    const blob = await response.blob();
+    let filename = 'download.zip';
+    const disposition = response.headers.get('Content-Disposition') || '';
+    const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+    const asciiMatch = disposition.match(/filename="([^"]+)"/i);
+    if (utf8Match) {
+      filename = decodeURIComponent(utf8Match[1]);
+    } else if (asciiMatch) {
+      filename = asciiMatch[1];
+    }
+
+    return { blob, filename, json: null };
+  },
+
+  /**
+   * 触发浏览器下载 Blob
+   * @param {Blob} blob
+   * @param {string} filename
+   */
+  downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename || 'download.zip';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
   },
 
   /**
    * 重定向到登录页（触发 Vue 显示登录组件）
    */
   redirectToLogin() {
-    // 触发 Vue 显示登录页面
     if (window.app) {
+      window.app.currentUser = null;
+      window.app.userLoading = false;
       window.app.showLogin = true;
     }
   }

@@ -5,6 +5,7 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const fileController = require('../controllers/fileController');
+const fileTypes = require('../utils/fileTypes');
 
 /**
  * 修复上传文件名编码：
@@ -33,18 +34,11 @@ const upload = multer({
     // 修正中文文件名编码
     file.originalname = fixFilename(file.originalname);
 
-    // 允许 PDF 与 Markdown（.md / .markdown），按 mimetype 或扩展名判别
-    const name = (file.originalname || '').toLowerCase();
-    const isPdf = file.mimetype === 'application/pdf' || name.endsWith('.pdf');
-    const isMd = file.mimetype === 'text/markdown'
-      || file.mimetype === 'text/plain'
-      || file.mimetype === 'application/octet-stream'
-      || name.endsWith('.md')
-      || name.endsWith('.markdown');
-    if (isPdf || isMd) {
+    // 以扩展名为准（Office/压缩包 MIME 常为 octet-stream）
+    if (fileTypes.isAllowed(file.originalname)) {
       cb(null, true);
     } else {
-      cb(new Error('仅支持 PDF 或 Markdown 文件'), false);
+      cb(new Error(`不支持的文件类型，允许：${fileTypes.ALLOWED_EXTS.join(', ')}`), false);
     }
   }
 });
@@ -55,11 +49,20 @@ router.post('/upload', upload.single('file'), fileController.upload);
 // 批量上传文件（同一 projectId + docType + segmentNo）
 router.post('/upload-batch', upload.array('files', 10), fileController.batchUpload);
 
+// 按文件内容 AI 识别文档类型（从文件夹导入兜底，不落库）
+router.post('/classify', upload.single('file'), fileController.classify);
+
 // 获取项目文件状态（含队列状态）
 router.get('/status/:projectId', fileController.getStatus);
 
+// 查看文件（浏览器内联打开，从 NAS 读取）
+router.get('/:id/view', fileController.view);
+
 // 重试转换失败的文件
 router.post('/:id/retry', fileController.retry);
+
+// 更新文件信息（提取结果、状态等）
+router.put('/:id/paper-review', fileController.updatePaperReview);
 
 // 更新文件信息（提取结果、状态等）
 router.put('/:id', fileController.update);

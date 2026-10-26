@@ -5,6 +5,12 @@
  */
 const deepseekService = require('../services/deepseek');
 const dao = require('../database/dao');
+const projectExtractLog = require('../utils/projectExtractLog');
+const {
+  checkProjectAccess,
+  respondProjectAccessCheck,
+  touchUpdaterFromReq
+} = require('../utils/projectAuth');
 
 module.exports = {
   /**
@@ -30,6 +36,10 @@ module.exports = {
       if (fileId && result && typeof result === 'object') {
         const file = dao.getFile(fileId);
         if (file) {
+          const project = dao.getProject(file.project_id);
+          const accessCheck = checkProjectAccess(project, req.user?.userid);
+          if (!respondProjectAccessCheck(res, accessCheck)) return;
+
           // 读取已有的 extracted_data
           let existingData = {};
           if (file.extracted_data) {
@@ -47,6 +57,17 @@ module.exports = {
 
           // 保存回 files 表
           dao.updateFile(fileId, { extracted_data: mergedData });
+          touchUpdaterFromReq(file.project_id, req.user);
+
+          const hadPrevious = projectExtractLog.hasExtractedData(file.extracted_data);
+          projectExtractLog.append(file.project_id, {
+            action: hadPrevious ? 're-extract' : 'extract',
+            fileId: file.id,
+            fileName: file.file_name,
+            docType: file.doc_type,
+            segmentNo: file.segment_no,
+            result: mergedData,
+          });
 
           console.log(`[Extract] 文件 ${fileId} 提取结果已累加保存，新增/更新 ${Object.keys(result).length} 个字段，总计 ${Object.keys(mergedData).length} 个字段`);
 
@@ -64,6 +85,22 @@ module.exports = {
       res.json({ success: true, data: result });
     } catch (error) {
       console.error('[Extract] 提取失败:', error.message);
+
+      const { fileId } = req.body || {};
+      if (fileId) {
+        const file = dao.getFile(fileId);
+        if (file) {
+          projectExtractLog.append(file.project_id, {
+            action: 'extract_failed',
+            fileId: file.id,
+            fileName: file.file_name,
+            docType: file.doc_type,
+            segmentNo: file.segment_no,
+            error: error.message,
+          });
+        }
+      }
+
       res.status(500).json({ error: error.message });
     }
   },
@@ -79,6 +116,10 @@ module.exports = {
       if (!file) {
         return res.status(404).json({ error: '文件不存在' });
       }
+
+      const project = dao.getProject(file.project_id);
+      const accessCheck = checkProjectAccess(project, req.user?.userid);
+      if (!respondProjectAccessCheck(res, accessCheck)) return;
 
       let extractedData = {};
       if (file.extracted_data) {

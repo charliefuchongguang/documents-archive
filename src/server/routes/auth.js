@@ -11,8 +11,6 @@ router.post('/login', authController.login);
 
 // 需要认证的路由
 router.get('/userinfo', requireAuth, authController.userinfo);
-router.post('/users', requireAuth, authController.createUser);
-router.get('/users', requireAuth, authController.listUsers);
 router.put('/change-password', requireAuth, authController.changePassword);
 
 module.exports = router;

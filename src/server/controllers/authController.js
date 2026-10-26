@@ -3,43 +3,67 @@
  */
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
-const crypto = require('crypto');
 const config = require('../config');
 const dao = require('../database/dao');
+const userMgmtDao = require('../database/userMgmtDao');
+
+function formatAuthUser(user) {
+  return {
+    id: user.id,
+    username: user.username,
+    name: user.name,
+    phone: user.phone || '',
+    role: user.roleCode || user.role,
+    roleId: user.roleId,
+    roleName: user.roleName,
+    roleCode: user.roleCode || user.role,
+    departmentId: user.departmentId,
+    departmentName: user.departmentName,
+    status: user.status
+  };
+}
 
 module.exports = {
   /**
    * POST /api/auth/login
-   * 账号密码登录
-   * Body: { username, password }
+   * 账号密码登录（用户名或手机号）
+   * Body: { username, password }  — username 可为用户名或手机号
    */
   async login(req, res) {
     try {
       const { username, password } = req.body;
       if (!username || !password) {
-        return res.status(400).json({ error: '请输入用户名和密码' });
+        return res.status(400).json({ error: '请输入用户名/手机号和密码' });
       }
 
-      const user = dao.getUserByUsername(username);
-      if (!user) {
+      const account = String(username).trim();
+      const authUser = userMgmtDao.getUserAuthByAccount(account);
+      if (!authUser) {
         return res.status(401).json({ error: '用户名或密码错误' });
       }
 
-      const valid = bcrypt.compareSync(password, user.password_hash);
+      if (authUser.status === 'disabled') {
+        return res.status(403).json({ error: '账号已被禁用，请联系管理员' });
+      }
+
+      const valid = bcrypt.compareSync(password, authUser.password_hash);
       if (!valid) {
         return res.status(401).json({ error: '用户名或密码错误' });
       }
 
+      const user = userMgmtDao.getUserWithRelations(authUser.id);
+      const roleCode = user.roleCode || authUser.role_code || authUser.role || 'user';
+
       // 签发 JWT（7天有效）
       const token = jwt.sign(
-        { userid: user.id, name: user.name, role: user.role },
+        { userid: user.id, name: user.name, role: roleCode },
         config.jwtSecret,
         { expiresIn: '7d' }
       );
 
       res.json({
         token,
-        user: { id: user.id, username: user.username, name: user.name, role: user.role }
+        user: formatAuthUser(user)
       });
     } catch (error) {
       console.error('登录失败:', error);
@@ -52,61 +76,19 @@ module.exports = {
    * 获取当前登录用户信息
    */
   async userinfo(req, res) {
-    const user = dao.getUserById(req.user.userid);
-    if (!user) {
-      return res.status(404).json({ error: '用户不存在' });
-    }
-    res.json(user);
-  },
-
-  /**
-   * POST /api/auth/users
-   * 创建用户（仅管理员）
-   * Body: { username, password, name, role? }
-   */
-  async createUser(req, res) {
     try {
-      if (req.user.role !== 'admin') {
-        return res.status(403).json({ error: '仅管理员可创建用户' });
+      const user = userMgmtDao.getUserWithRelations(req.user.userid);
+      if (!user) {
+        return res.status(404).json({ error: '用户不存在' });
       }
-
-      const { username, password, name, role = 'user' } = req.body;
-      if (!username || !password || !name) {
-        return res.status(400).json({ error: '用户名、密码和姓名不能为空' });
+      if (user.status === 'disabled') {
+        return res.status(403).json({ error: '账号已被禁用' });
       }
-
-      // 检查用户名是否已存在
-      const existing = dao.getUserByUsername(username);
-      if (existing) {
-        return res.status(409).json({ error: '用户名已存在' });
-      }
-
-      const hash = bcrypt.hashSync(password, 10);
-      const user = dao.createUser({
-        id: crypto.randomUUID(),
-        username,
-        passwordHash: hash,
-        name,
-        role
-      });
-
-      res.status(201).json({ id: user.id, username: user.username, name: user.name, role: user.role });
+      res.json(formatAuthUser(user));
     } catch (error) {
-      console.error('创建用户失败:', error);
-      res.status(500).json({ error: '创建用户失败' });
+      console.error('获取用户信息失败:', error);
+      res.status(500).json({ error: '获取用户信息失败' });
     }
-  },
-
-  /**
-   * GET /api/auth/users
-   * 获取用户列表（仅管理员）
-   */
-  async listUsers(req, res) {
-    if (req.user.role !== 'admin') {
-      return res.status(403).json({ error: '仅管理员可查看用户列表' });
-    }
-    const users = dao.getUsers();
-    res.json(users);
   },
 
   /**
@@ -120,20 +102,22 @@ module.exports = {
       if (!oldPassword || !newPassword) {
         return res.status(400).json({ error: '请输入旧密码和新密码' });
       }
+      if (newPassword.length < 6) {
+        return res.status(400).json({ error: '新密码至少 6 位' });
+      }
 
-      // 通过 id 查找完整用户信息（包含 password_hash）
-      const userInfo = dao.getUserById(req.user.userid);
+      const userInfo = userMgmtDao.getUserWithRelations(req.user.userid);
       if (!userInfo) {
         return res.status(404).json({ error: '用户不存在' });
       }
 
-      const fullUser = dao.getUserByUsername(userInfo.username);
+      const fullUser = userMgmtDao.getUserAuthByUsername(userInfo.username);
       if (!fullUser || !bcrypt.compareSync(oldPassword, fullUser.password_hash)) {
         return res.status(401).json({ error: '旧密码不正确' });
       }
 
       const hash = bcrypt.hashSync(newPassword, 10);
-      dao.updateUserPassword(req.user.userid, hash);
+      userMgmtDao.resetUserPassword(req.user.userid, hash);
       res.json({ message: '密码修改成功' });
     } catch (error) {
       console.error('修改密码失败:', error);

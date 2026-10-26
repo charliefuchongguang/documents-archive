@@ -6,8 +6,14 @@
 
 /**
  * 映射后端项目字段为前端格式
- * 后端: id, name, status, created_by, created_by_name, synced_at, created_at, updated_at
- * 前端: projectId, projectName, status, createdBy, createdByName, syncedAt, createdAt, updatedAt
+ * 后端: id, name, status, created_by, created_by_name, updated_by, updated_by_name,
+ *       department_id, department_name, department_sort_order,
+ *       category_id, category_code, category_name, category_sort_order,
+ *       synced_at, created_at, updated_at
+ * 前端: projectId, projectName, status, createdBy, createdByName, updatedBy, updatedByName,
+ *       departmentId, departmentName, departmentSortOrder,
+ *       categoryId, categoryCode, categoryName, categorySortOrder,
+ *       syncedAt, createdAt, updatedAt
  */
 function _mapProject(p) {
   if (!p) return null;
@@ -20,14 +26,40 @@ function _mapProject(p) {
     syncedAt: p.synced_at || p.syncedAt,
     createdBy: p.created_by || p.createdBy,
     createdByName: p.created_by_name || p.createdByName,
-    procurementType: p.procurement_type || p.procurementType || 'F',
+    updatedBy: p.updated_by || p.updatedBy,
+    updatedByName: p.updated_by_name || p.updatedByName,
+    departmentId: p.department_id || p.departmentId || '',
+    departmentName: p.department_name || p.departmentName || '',
+    departmentSortOrder: p.department_sort_order != null
+      ? Number(p.department_sort_order)
+      : (p.departmentSortOrder != null ? Number(p.departmentSortOrder) : Number.MAX_SAFE_INTEGER),
+    categoryId: p.category_id || p.categoryId || '',
+    categoryCode: p.category_code || p.categoryCode || 'tender',
+    categoryName: p.category_name || p.categoryName || '招标',
+    categorySortOrder: p.category_sort_order != null
+      ? Number(p.category_sort_order)
+      : (p.categorySortOrder != null ? Number(p.categorySortOrder) : 1),
+    procurementType: p.procurement_type || p.procurementType || 'G',
+    region: p.region || '',
+    reviewComment: p.review_comment || p.reviewComment || '',
+    reviewedBy: p.reviewed_by || p.reviewedBy || '',
+    reviewedByName: p.reviewed_by_name || p.reviewedByName || '',
+    reviewedAt: p.reviewed_at || p.reviewedAt || '',
+    paperReviewedBy: p.paper_reviewed_by || p.paperReviewedBy || '',
+    paperReviewedByName: p.paper_reviewed_by_name || p.paperReviewedByName || '',
+    paperReviewedAt: p.paper_reviewed_at || p.paperReviewedAt || '',
+    paperReviewComment: p.paper_review_comment || p.paperReviewComment || '',
+    archiveTemplate: p.archive_template || p.archiveTemplate || '',
+    projectNo: p.project_no || p.projectNo || '',
+    paperTotal: Number(p.paper_total != null ? p.paper_total : (p.paperTotal != null ? p.paperTotal : 0)) || 0,
+    paperConfirmed: Number(p.paper_confirmed != null ? p.paper_confirmed : (p.paperConfirmed != null ? p.paperConfirmed : 0)) || 0,
   };
 }
 
 /**
  * 映射后端文件字段为前端格式
- * 后端: id, project_id, doc_type, file_name, md_content, extracted_data, status, nas_path, error_msg
- * 前端: id, projectId, docType, filename, content, extracted, status, nasPath, errorMsg
+ * 后端: id, project_id, doc_type, file_name, md_content, extracted_data, status, nas_path, local_path, error_msg
+ * 前端: id, projectId, docType, filename, content, extracted, status, nasPath, localPath, errorMsg
  */
 function _mapFile(f) {
   if (!f) return null;
@@ -39,10 +71,15 @@ function _mapFile(f) {
     content: f.md_content || f.content,
     extracted: f.extracted_data !== undefined ? f.extracted_data : f.extracted,
     nasPath: f.nas_path || f.nasPath,
+    localPath: f.local_path || f.localPath,
     segmentNo: f.segment_no !== undefined ? f.segment_no : (f.segmentNo || 0),
-    errorMsg: f.error_msg || f.errorMsg,
+    errorMsg: (f.error_msg && f.error_msg !== 'null') ? f.error_msg : (f.errorMsg || null),
+    contentHash: f.content_hash || f.contentHash || null,
+    folderKey: f.folder_key || f.folderKey || '',
     createdAt: f.created_at || f.createdAt,
     updatedAt: f.updated_at || f.updatedAt,
+    hasPaper: !!(f.has_paper || f.hasPaper),
+    paperReviewed: !!(f.paper_reviewed || f.paperReviewed),
   };
 }
 
@@ -53,21 +90,114 @@ window.DB = {
   /**
    * 创建新项目
    * @param {string} name - 项目名称
+   * @param {string} [categoryCode='tender'] - 业务分类 code：tender | consult | cost
+   * @param {{ region?: string, procurementType?: string }} [options]
    * @returns {Promise<string>} 创建的项目ID
    */
-  async createProject(name) {
-    const project = await Http.post('/projects', { name });
+  async createProject(name, categoryCode = 'tender', options = {}) {
+    const body = {
+      name,
+      categoryCode,
+      region: options.region || '',
+      procurementType: options.procurementType || 'G'
+    };
+    const project = await Http.post('/projects', body);
     return _mapProject(project).projectId;
   },
 
   /**
-   * 获取所有项目
-   * @returns {Promise<Array>} 项目列表（已映射为前端格式）
+   * 获取项目列表（含可见部门骨架与全局状态统计）
+   * @param {Object} [options]
+   * @param {string} [options.search]
+   * @param {string[]} [options.categoryCodes]
+   * @param {string[]} [options.statuses]
+   * @param {string[]} [options.regions]
+   * @param {string[]} [options.tenderTypes]
+   * @param {string[]} [options.projectTypes]
+   * @param {string[]} [options.roadLevels]
+   * @param {string[]} [options.industries]
+   * @param {number} [options.page]
+   * @param {number} [options.pageSize]
+   * @returns {Promise<{ projects: Array, departments: Array, stats: Object, total: number, page: number, pageSize: number }>}
    */
-  async getProjects() {
-    const result = await Http.get('/projects?pageSize=100');
+  async getProjects({
+    search = '',
+    searchField = 'name_overview',
+    categoryCodes = [],
+    statuses = [],
+    regions = [],
+    tenderTypes = [],
+    projectTypes = [],
+    roadLevels = [],
+    industries = [],
+    page = 1,
+    pageSize = 100,
+    dateField = '',
+    dateFrom = '',
+    dateTo = '',
+    amountField = 'totalInvestment',
+    amountMin = '',
+    amountMax = '',
+    mileageMin = '',
+    mileageMax = ''
+  } = {}) {
+    const params = new URLSearchParams();
+    params.set('page', String(page));
+    params.set('pageSize', String(pageSize));
+    if (search) params.set('search', search);
+    if (searchField) params.set('searchField', searchField);
+    if (dateField) params.set('dateField', dateField);
+    if (dateFrom) params.set('dateFrom', dateFrom);
+    if (dateTo) params.set('dateTo', dateTo);
+    if (amountField) params.set('amountField', amountField);
+    if (amountMin !== '' && amountMin != null) params.set('amountMin', String(amountMin));
+    if (amountMax !== '' && amountMax != null) params.set('amountMax', String(amountMax));
+    if (mileageMin !== '' && mileageMin != null) params.set('mileageMin', String(mileageMin));
+    if (mileageMax !== '' && mileageMax != null) params.set('mileageMax', String(mileageMax));
+    for (const code of categoryCodes) {
+      if (code) params.append('categoryCode', code);
+    }
+    for (const status of statuses) {
+      if (status) params.append('status', status);
+    }
+    for (const region of regions) {
+      if (region) params.append('region', region);
+    }
+    for (const v of tenderTypes) {
+      if (v) params.append('tenderType', v);
+    }
+    for (const v of projectTypes) {
+      if (v) params.append('projectType', v);
+    }
+    for (const v of roadLevels) {
+      if (v) params.append('roadLevel', v);
+    }
+    for (const v of industries) {
+      if (v) params.append('industry', v);
+    }
+    const query = params.toString();
+    const result = await Http.get(`/projects${query ? `?${query}` : ''}`);
     const items = result.items || [];
-    return items.map(_mapProject);
+    const departments = (result.departments || []).map((d) => ({
+      id: d.id,
+      name: d.name,
+      sortOrder: d.sortOrder != null ? Number(d.sortOrder) : 0
+    }));
+    const stats = result.stats || {};
+    return {
+      projects: items.map(_mapProject),
+      departments,
+      stats: {
+        inProgress: Number(stats.inProgress) || 0,
+        pendingReview: Number(stats.pendingReview) || 0,
+        reviewRejected: Number(stats.reviewRejected) || 0,
+        pendingPaper: Number(stats.pendingPaper) || 0,
+        archived: Number(stats.archived) || 0
+      },
+      total: Number(result.total) || 0,
+      page: Number(result.page) || page,
+      pageSize: Number(result.pageSize) || pageSize
+    };
   },
 
   /**
@@ -75,7 +205,8 @@ window.DB = {
    * @returns {Promise<Array>}
    */
   async getAllProjects() {
-    return this.getProjects();
+    const { projects } = await this.getProjects();
+    return projects;
   },
 
   /**
@@ -89,10 +220,23 @@ window.DB = {
   },
 
   /**
+   * 更新项目归档模板（空值表示自动）
+   * @param {string} projectId
+   * @param {string} archiveTemplate
+   * @returns {Promise<Object>}
+   */
+  async updateArchiveTemplate(projectId, archiveTemplate) {
+    const result = await Http.put(`/projects/${projectId}/archive-template`, {
+      archiveTemplate: archiveTemplate || ''
+    });
+    return _mapProject(result);
+  },
+
+  /**
    * 更新项目信息
-   * @param {string} projectId - 项目ID
-   * @param {Object} data - 要更新的数据（前端格式自动转后端格式）
-   * @returns {Promise<Object>} 更新后的项目对象
+   * @param {string} projectId
+   * @param {Object} data
+   * @returns {Promise<Object>}
    */
   async updateProject(projectId, data) {
     // 将前端 camelCase 转为后端 snake_case
@@ -107,11 +251,34 @@ window.DB = {
   },
 
   /**
+   * 管理员调整项目所属部门与临时归属人
+   * @param {string} projectId
+   * @param {{ departmentId: string, ownerUserId: string }} data
+   * @returns {Promise<Object>}
+   */
+  async reassignProjectOwnership(projectId, data) {
+    const result = await Http.put(`/projects/${projectId}/ownership`, {
+      departmentId: data.departmentId,
+      ownerUserId: data.ownerUserId
+    });
+    return _mapProject(result);
+  },
+
+  /**
    * 删除项目及其关联数据
    * @param {string} projectId - 项目ID
    */
   async deleteProject(projectId) {
     await Http.del(`/projects/${projectId}`);
+  },
+
+  /**
+   * 批量删除项目
+   * @param {string[]} projectIds - 项目 ID 列表
+   * @returns {Promise<Object>}
+   */
+  async deleteProjectsBatch(projectIds) {
+    return Http.post('/projects/delete-batch', { ids: projectIds });
   },
 
   // ==================== 文件相关操作 ====================
@@ -136,20 +303,27 @@ window.DB = {
   },
 
   /**
-   * 上传文件（PDF → 后端处理 MineRU 转换和 NAS 存储）
+   * 上传文件（后端处理转换 / NAS；支持同分类同标段去重覆盖）
    * @param {string} projectId - 项目ID
    * @param {string} docType - 文档类型
-   * @param {File} file - PDF 文件对象
-   * @param {number} [segmentNo=0] - 标段编号（默认0表示不分标段）
+   * @param {File} file - 文件对象
+   * @param {number} [segmentNo=0] - 标段编号（1-based，0 表示未分配）
+   * @param {{ overwrite?: boolean, onProgress?: (loaded: number, total: number) => void }} [options]
    * @returns {Promise<Object>} 上传结果
    */
-  async uploadFile(projectId, docType, file, segmentNo = 0) {
+  async uploadFile(projectId, docType, file, segmentNo = 0, options = {}) {
     const formData = new FormData();
     formData.append('file', file);
     formData.append('projectId', projectId);
     formData.append('docType', docType);
     formData.append('segmentNo', segmentNo);
-    const result = await Http.upload('/files/upload', formData);
+    if (options.folderKey) {
+      formData.append('folderKey', options.folderKey);
+    }
+    if (options.overwrite) {
+      formData.append('overwrite', 'true');
+    }
+    const result = await Http.upload('/files/upload', formData, options.onProgress);
     // 映射返回的 file 对象
     if (result.file) {
       result.file = _mapFile(result.file);
@@ -171,7 +345,21 @@ window.DB = {
     if (data.errorMsg !== undefined) mapped.error_msg = data.errorMsg;
     if (data.mdContent !== undefined) mapped.md_content = data.mdContent;
     if (data.nasPath !== undefined) mapped.nas_path = data.nasPath;
+    if (data.localPath !== undefined) mapped.local_path = data.localPath;
+    if (data.hasPaper !== undefined) mapped.hasPaper = !!data.hasPaper;
+    if (data.folderKey !== undefined) mapped.folder_key = data.folderKey;
     const result = await Http.put(`/files/${fileId}`, mapped);
+    return _mapFile(result);
+  },
+
+  /**
+   * 管理员确认含纸质文件（待审核）
+   * @param {string} fileId
+   * @param {boolean} paperReviewed
+   * @returns {Promise<Object>}
+   */
+  async updateFilePaperReview(fileId, paperReviewed) {
+    const result = await Http.put(`/files/${fileId}/paper-review`, { paperReviewed: !!paperReviewed });
     return _mapFile(result);
   },
 
@@ -253,7 +441,7 @@ window.DB = {
   /**
    * 更新文件标段号
    * @param {string} fileId - 文件ID
-   * @param {number} segmentNo - 标段编号
+   * @param {number} segmentNo - 标段编号（1-based，0 表示未分配）
    */
   async updateFileSegmentNo(fileId, segmentNo) {
     return Http.put(`/files/${fileId}/segment-no`, { segmentNo });
@@ -266,12 +454,17 @@ window.DB = {
    * @param {string} projectId - 项目ID
    * @param {Object} formData - 合并后的字段数据
    * @param {Object} [conflicts] - 冲突信息
+   * @param {Array} [segmentFormData] - 多标段表单数据
    */
-  async saveMergedData(projectId, formData, conflicts) {
-    return Http.post(`/projects/${projectId}/merged-data`, {
+  async saveMergedData(projectId, formData, conflicts, segmentFormData) {
+    const payload = {
       formData,
       conflicts: conflicts || {}
-    });
+    };
+    if (segmentFormData != null) {
+      payload.segmentFormData = segmentFormData;
+    }
+    return Http.post(`/projects/${projectId}/merged-data`, payload);
   },
 
   /**
@@ -280,6 +473,14 @@ window.DB = {
    * @returns {Promise<Object|null>} 合并数据
    */
   async getMergedData(projectId) {
-    return Http.get(`/projects/${projectId}/merged-data`);
+    const data = await Http.get(`/projects/${projectId}/merged-data`);
+    if (!data) return null;
+    // 统一为前端可用的 camelCase（dao 返回 form_data）
+    return {
+      ...data,
+      formData: data.formData || data.form_data || {},
+      conflicts: data.conflicts || {},
+      segmentFormData: data.segmentFormData || data.segment_form_data || []
+    };
   }
 };

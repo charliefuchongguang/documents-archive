@@ -1,0 +1,16 @@
+[Unit]
+Description=Documents Archive
+After=network.target
+
+[Service]
+User=ceor
+Group=ceor
+WorkingDirectory=/opt/www/doc-archive/src/server
+ExecStart=/home/ceor/.local/bin/mise exec -- node app.js
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target
