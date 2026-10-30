@@ -788,17 +788,13 @@ module.exports = {
         return res.status(409).json({ error: '归档记录不存在，请先完成电子档审核' });
       }
 
-      const paperFiles = dao.getFilesByProject(projectId).filter((f) => f && f.has_paper);
-      const unconfirmed = paperFiles.filter((f) => !f.paper_reviewed);
-      if (unconfirmed.length > 0) {
-        return res.status(409).json({
-          error: `尚有 ${unconfirmed.length} 份含纸质文件未确认收到，无法完成纸质档核对`,
-          unconfirmed: unconfirmed.map((f) => ({
-            id: f.id,
-            fileName: f.file_name,
-            docType: f.doc_type
-          }))
-        });
+const paperFiles = dao.getFilesByProject(projectId).filter((f) => f && f.has_paper);
+      // 纸质核对改为在归档项目详情页勾选“含纸质”，勾选即代表已收到。
+      // 历史数据可能只有 has_paper 没有 paper_reviewed，这里一并补确认，避免无法完成核对。
+      for (const file of paperFiles) {
+        if (!file.paper_reviewed) {
+          dao.updateFile(file.id, { paper_reviewed: 1 });
+        }
       }
 
       const comment = typeof req.body.comment === 'string' ? req.body.comment.trim() : '';

@@ -904,7 +904,11 @@ app.component('workbench-page', {
       return project.status === 'review_rejected' ? '重新提交' : '继续填写';
     },
     rowPath(project) {
-      return this.isAdmin ? '#/review/' + project.projectId : '#/project/' + project.projectId;
+      // 电子审核仍在复核页；纸质核对改为在归档项目详情页完成
+      if (this.isAdmin && project.status === 'pending_review') {
+        return '#/review/' + project.projectId;
+      }
+      return '#/project/' + project.projectId;
     },
     updateLine(project) {
       const who = project.updatedByName || project.createdByName || '';
@@ -1758,11 +1762,13 @@ app.component('home-page', {
           <el-table-column label="更新" width="82">
             <template #default="{ row }"><span class="ap-time">{{ shortDate(row.updatedAt) }}</span></template>
           </el-table-column>
-          <el-table-column label="操作" width="200" fixed="right">
+          <el-table-column label="操作" width="220" fixed="right">
             <template #default="{ row }">
-              <el-button text type="primary" @click="goDetail(row)">进入归档</el-button>
-              <el-button v-if="!row.masterProjectId && canChangeMaster(row)" text @click="openAssignDialog(row)">归入工程</el-button>
-              <el-button v-if="canDeleteProject(row)" text type="danger" @click="deleteProject(row)">删除</el-button>
+              <div class="table-actions">
+                <el-button text type="primary" @click="goDetail(row)">进入归档</el-button>
+                <el-button v-if="!row.masterProjectId && canChangeMaster(row)" text @click="openAssignDialog(row)">归入工程</el-button>
+                <el-button v-if="canDeleteProject(row)" text type="danger" @click="deleteProject(row)">删除</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -1832,6 +1838,8 @@ app.component('project-page', {
       showMasterDialog: false,
       masterSelection: null,
       masterSaving: false,
+      paperReviewComment: '',
+      paperSubmitting: false,
       // ---- 导入方式选择 / 从文件夹导入 ----
       importMethodVisible: false, // 导入方式选择弹窗
       folderImportVisible: false,
@@ -2006,6 +2014,45 @@ app.component('project-page', {
      */
     isPendingPaper() {
       return !!(this.project && this.project.status === 'pending_paper');
+    },
+    /**
+     * 纸质核对阶段：仅管理员可在详情页编辑“含纸质”
+     */
+    canEditPaperMark() {
+      return !!(this.isAdmin && this.isPendingPaper);
+    },
+    showPaperReviewPanel() {
+      return this.canEditPaperMark;
+    },
+    /**
+     * 纸质核对清单：所有可标记的电子文件
+     */
+    paperChecklistFiles() {
+      return Object.values(this.files || {})
+        .flat()
+        .filter((f) => f && Utils.canMarkPaperFile(f) && this.displayDocTypes[f.docType])
+        .map((f) => ({
+          ...f,
+          categoryLabel: Utils.formatFileDocCategory(f.docType, f.segmentNo, this.segments)
+        }));
+    },
+    paperChecklistProgress() {
+      const list = this.paperChecklistFiles;
+      return {
+        total: list.length,
+        checked: list.filter((f) => f.hasPaper).length
+      };
+    },
+    paperMissingFiles() {
+      return this.paperChecklistFiles.filter((f) => !f.hasPaper);
+    },
+    paperMissingLabels() {
+      const labels = [...new Set(this.paperMissingFiles.map((f) => f.categoryLabel || f.filename || '未命名文件'))];
+      const missingCount = this.paperMissingFiles.length;
+      let text = labels.slice(0, 8).join('、');
+      if (labels.length > 8) text += ' 等';
+      if (missingCount > labels.length) text += `（共 ${missingCount} 份）`;
+      return text;
     },
     projectStatusLabel() {
       const map = {
@@ -2340,6 +2387,9 @@ app.component('project-page', {
           this.loadSegments(),
           this.loadArchiveTemplates()
         ]);
+        if (this.showPaperReviewPanel) {
+          this.paperReviewComment = (this.project && this.project.paperReviewComment) || this.buildPaperAutoComment();
+        }
         // 从项目信息中加载采购类型与所属地域
         if (this.project && this.project.procurementType) {
           this.procurementType = this.project.procurementType;
@@ -2353,7 +2403,9 @@ app.component('project-page', {
           if (this.isPendingReview) {
             ElementPlus.ElMessage.info('当前项目待审核，仅可查看');
           } else if (this.isPendingPaper) {
-            ElementPlus.ElMessage.info('当前项目待纸质核对，仅可查看');
+            ElementPlus.ElMessage.info(this.isAdmin
+              ? '当前项目待纸质核对，请勾选已收到纸质档的文件并完成核对'
+              : '当前项目待纸质核对，仅可查看');
           } else {
             ElementPlus.ElMessage.info('当前项目已归档，仅可查看');
           }
@@ -2577,14 +2629,65 @@ app.component('project-page', {
      * @param {boolean} checked
      */
     async onFileHasPaperChange(fileItem, checked) {
-      if (!fileItem || this.isLocked) return;
+      if (!fileItem || (this.isLocked && !this.canEditPaperMark)) return;
       const prev = !!fileItem.hasPaper;
+      const prevReviewed = !!fileItem.paperReviewed;
       fileItem.hasPaper = !!checked;
+      if (this.canEditPaperMark) fileItem.paperReviewed = !!checked;
       try {
         await DB.updateFile(fileItem.id, { hasPaper: !!checked });
+        if (this.canEditPaperMark) this.updatePaperAutoComment();
       } catch (error) {
         fileItem.hasPaper = prev;
+        fileItem.paperReviewed = prevReviewed;
         ElMessage.error('保存含纸质标记失败: ' + error.message);
+      }
+    },
+    /**
+     * 根据当前勾选情况生成纸质核对意见
+     */
+    buildPaperAutoComment() {
+      const list = this.paperChecklistFiles;
+      const missing = list.filter((f) => !f.hasPaper);
+      if (missing.length === 0) return '所有纸质文档已收齐';
+      const labels = [...new Set(missing.map((f) => f.categoryLabel || f.filename || '未命名文件'))];
+      let text = labels.slice(0, 10).join('、');
+      if (labels.length > 10) text += ' 等';
+      if (missing.length > labels.length) text += `（共 ${missing.length} 份）`;
+      return '尚缺' + text;
+    },
+    updatePaperAutoComment() {
+      if (!this.canEditPaperMark) return;
+      this.paperReviewComment = this.buildPaperAutoComment();
+    },
+    /**
+     * 详情页完成纸质核对
+     */
+    async completePaperReviewOnDetail() {
+      if (this.paperSubmitting) return;
+      const missing = this.paperMissingFiles;
+      if (missing.length > 0) {
+        try {
+          await ElMessageBox.confirm(
+            `尚有 ${missing.length} 份电子文件未勾选纸质档，确认完成纸质核对？审核意见将记录尚缺文件。`,
+            '确认完成纸质核对',
+            { confirmButtonText: '仍然完成', cancelButtonText: '继续核对', type: 'warning' }
+          );
+        } catch (e) {
+          return;
+        }
+      }
+      this.paperSubmitting = true;
+      try {
+        const result = await API.completePaperReview(this.projectId, {
+          comment: String(this.paperReviewComment || '').trim()
+        });
+        ElMessage.success(result.message || '纸质档核对完成，项目已全部归档');
+        navigateTo('#/projects');
+      } catch (error) {
+        ElMessage.error(error.message || '完成纸质核对失败');
+      } finally {
+        this.paperSubmitting = false;
       }
     },
     /**
@@ -3898,7 +4001,7 @@ app.component('project-page', {
                     <el-checkbox
                       v-if="canMarkPaperFile(fileItem)"
                       :model-value="!!fileItem.hasPaper"
-                      :disabled="isLocked"
+                      :disabled="isLocked && !canEditPaperMark"
                       class="paper-checkbox"
                       @change="(val) => onFileHasPaperChange(fileItem, val)"
                     >含纸质</el-checkbox>
@@ -3943,6 +4046,7 @@ app.component('project-page', {
                 <span class="preview-value">{{ item.value }}</span>
               </div>
               <el-button
+                v-if="!isPendingPaper"
                 type="primary"
                 style="margin-top:16px"
                 :disabled="batchExtracting"
@@ -4014,6 +4118,34 @@ app.component('project-page', {
                 </tbody>
               </table>
             </div>
+          </div>
+
+          <div v-if="showPaperReviewPanel" class="review-info-panel paper-review-panel">
+            <h3>纸质档核对</h3>
+            <div class="paper-review-hint">
+              对照左侧电子文件列表，勾选已收到纸质档的文件。勾选后审核意见会自动生成，可再手动修改。
+            </div>
+            <div class="paper-review-progress-row">
+              已收到 <b>{{ paperChecklistProgress.checked }}</b> / {{ paperChecklistProgress.total }} 份
+            </div>
+            <div v-if="paperMissingFiles.length > 0" class="paper-review-missing">
+              尚缺：{{ paperMissingLabels }}
+            </div>
+            <div class="paper-review-comment">
+              <span class="preview-label">审核意见：</span>
+              <el-input
+                v-model="paperReviewComment"
+                type="textarea"
+                :rows="4"
+                placeholder="勾选后自动生成，可手动修改"
+              />
+            </div>
+            <el-button
+              type="primary"
+              class="paper-review-submit"
+              :loading="paperSubmitting"
+              @click="completePaperReviewOnDetail"
+            >完成纸质核对</el-button>
           </div>
         </div>
       </div>
@@ -4470,6 +4602,13 @@ app.component('review-page', {
       this._autoSaveReady = false;
       try {
         this.project = await DB.getProject(this.projectId);
+
+        // 纸质核对阶段改为在归档项目详情页完成，复核页不再承载该环节
+        if (this.project && this.project.status === 'pending_paper') {
+          this.loading = false;
+          this.navigateTo('#/project/' + this.projectId);
+          return;
+        }
 
         // 加载采购类型与所属地域
         if (this.project && this.project.procurementType) {
@@ -5128,13 +5267,13 @@ app.component('review-page', {
         const comment = (this.adminReviewComment || '').trim();
         const result = await API.approveElectronic(this.projectId, { ...requestBody, comment });
         if (result.status === 'pending_paper') {
-          ElMessage.success('电子档审核通过，已生成待纸质核对');
+          ElMessage.success('电子档审核通过，请到归档项目详情页完成纸质核对');
           this.adminReviewComment = '';
           this.submitting = false;
-          await this.loadData();
+          navigateTo('#/project/' + this.projectId);
         } else {
           ElMessage.success('审核通过，项目已归档');
-          navigateTo('#/home');
+          navigateTo('#/projects');
         }
       } catch (error) {
         ElMessage.error('电子档审核失败: ' + error.message);
@@ -5158,7 +5297,7 @@ app.component('review-page', {
         const comment = (this.adminReviewComment || '').trim();
         const result = await API.completePaperReview(this.projectId, { comment });
         ElMessage.success(result.message || '纸质档核对完成，项目已全部归档');
-        navigateTo('#/home');
+        navigateTo('#/projects');
       } catch (error) {
         ElMessage.error('完成纸质档核对失败: ' + error.message);
         this.submitting = false;
@@ -5875,11 +6014,13 @@ app.component('master-project-list-page', {
           <el-table-column label="负责人" width="96">
             <template #default="{ row }">{{ row.manager || row.createdByName || '—' }}</template>
           </el-table-column>
-          <el-table-column label="操作" width="160" fixed="right">
+          <el-table-column label="操作" width="180" fixed="right">
             <template #default="{ row }">
-              <el-button text type="primary" @click="goDetail(row)">查看</el-button>
-              <el-button text @click="openEdit(row)">编辑</el-button>
-              <el-button v-if="isAdmin" text type="danger" @click="remove(row)">删除</el-button>
+              <div class="table-actions">
+                <el-button text type="primary" @click="goDetail(row)">查看</el-button>
+                <el-button text @click="openEdit(row)">编辑</el-button>
+                <el-button v-if="isAdmin" text type="danger" @click="remove(row)">删除</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>
@@ -6372,10 +6513,12 @@ app.component('admin-contract-ledger-page', {
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="120" fixed="right">
+          <el-table-column label="操作" width="140" fixed="right">
             <template #default="{ row }">
-              <el-button size="small" type="primary" text @click="openEditDialog(row)">编辑</el-button>
-              <el-button size="small" type="danger" text @click="confirmDelete(row)">删除</el-button>
+              <div class="table-actions">
+                <el-button size="small" type="primary" text @click="openEditDialog(row)">编辑</el-button>
+                <el-button size="small" type="danger" text @click="confirmDelete(row)">删除</el-button>
+              </div>
             </template>
           </el-table-column>
         </el-table>

@@ -384,6 +384,7 @@ window.DB = {
     if (data.nasPath !== undefined) mapped.nas_path = data.nasPath;
     if (data.localPath !== undefined) mapped.local_path = data.localPath;
     if (data.hasPaper !== undefined) mapped.hasPaper = !!data.hasPaper;
+    if (data.paperReviewed !== undefined) mapped.paperReviewed = !!data.paperReviewed;
     if (data.folderKey !== undefined) mapped.folder_key = data.folderKey;
     const result = await Http.put(`/files/${fileId}`, mapped);
     return _mapFile(result);
