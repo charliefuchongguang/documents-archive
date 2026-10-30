@@ -16,16 +16,18 @@ const ElMessageBox = ElementPlus.ElMessageBox;
  * 支持的路由格式：
  *   #/workbench     → { name: 'workbench' }
  *   #/projects      → { name: 'home', params: { category: '' } }
- *   #/projects/:cat → { name: 'home', params: { category } }（tender|consult|cost）
+ *   #/projects/:cat → { name: 'home', params: { category } }（tender|consult|cost，兼容旧链接）
  *   #/project/:id   → { name: 'project', params: { id } }
  *   #/review/:id    → { name: 'review', params: { id } }
+ *   #/master-projects     → { name: 'master-projects' }
+ *   #/master-projects/:id → { name: 'master-project', params: { id } }
  *   #/admin-archives → { name: 'admin-archives', params: {} }
  *   #/admin-contracts → { name: 'admin-contracts', params: {} }
  *   #/admin-users   → { name: 'admin-users', params: {} }
  * @returns {{path: string, name: string, params: Object}}
  */
 function parseRoute() {
-  const hash = window.location.hash || '#/workbench';
+  const hash = window.location.hash || '#/projects';
   const path = hash.replace(/^#/, '') || '/';
 
   // 匹配 /project/:id
@@ -38,6 +40,17 @@ function parseRoute() {
   const reviewMatch = path.match(/^\/review\/([^/]+)$/);
   if (reviewMatch) {
     return { path, name: 'review', params: { id: reviewMatch[1] } };
+  }
+
+  // 匹配 /master-projects/:id
+  const masterMatch = path.match(/^\/master-projects\/([^/]+)$/);
+  if (masterMatch) {
+    return { path, name: 'master-project', params: { id: masterMatch[1] } };
+  }
+
+  // 匹配 /master-projects
+  if (path === '/master-projects') {
+    return { path, name: 'master-projects', params: {} };
   }
 
   // 匹配 /admin-archives
@@ -55,24 +68,19 @@ function parseRoute() {
     return { path, name: 'admin-users', params: {} };
   }
 
-  // 工作台（登录后默认首页）
+  // 工作台（显式入口）
   if (path === '/workbench') {
     return { path, name: 'workbench', params: {} };
   }
 
-  // 项目列表：/projects 或 /projects/:category
+  // 归档项目列表：/projects 或 /projects/:category（兼容旧链接）
   const listMatch = path.match(/^\/projects(?:\/(tender|consult|cost))?$/);
   if (listMatch) {
     return { path, name: 'home', params: { category: listMatch[1] || '' } };
   }
 
-  // 兼容旧地址 /home、/
-  if (path === '/home' || path === '/') {
-    return { path, name: 'home', params: { category: '' } };
-  }
-
-  // 其余未知路径回到工作台
-  return { path, name: 'workbench', params: {} };
+  // 兼容旧地址 /home、/；空路径与未知路径默认落到归档项目
+  return { path, name: 'home', params: { category: '' } };
 }
 
 /**
@@ -158,6 +166,9 @@ const app = Vue.createApp({
       this.currentUser = user;
       this.userLoading = false;
       this.showLogin = false;
+      if (!window.location.hash || window.location.hash === '#/' || window.location.hash === '#') {
+        window.location.hash = '#/projects';
+      }
     },
     /**
      * 退出登录
@@ -247,6 +258,17 @@ const app = Vue.createApp({
         <review-page
           v-else-if="currentPage === 'review'"
           :project-id="currentRoute.params.id"
+          :current-user="currentUser"
+          @open-settings="openSettings"
+        />
+        <master-project-list-page
+          v-else-if="currentPage === 'master-projects'"
+          :current-user="currentUser"
+          @open-settings="openSettings"
+        />
+        <master-project-detail-page
+          v-else-if="currentPage === 'master-project'"
+          :master-project-id="currentRoute.params.id"
           :current-user="currentUser"
           @open-settings="openSettings"
         />
@@ -349,17 +371,15 @@ app.component('app-shell', {
     },
     pageTitle() {
       const name = this.route.name;
-      const cat = (this.route.params && this.route.params.category) || '';
-      if (name === 'home') {
-        const map = { tender: '招标项目', consult: '咨询项目', cost: '造价项目' };
-        return map[cat] || '全部项目';
-      }
+      if (name === 'home') return '归档项目';
       const map = {
         workbench: '工作台',
-        project: '项目详情',
+        project: '归档项目详情',
         review: '复核并确认信息',
+        'master-projects': '工程项目',
+        'master-project': '工程项目详情',
         'admin-archives': '归档记录',
-        'admin-contracts': '合同管理',
+        'admin-contracts': '合同台账',
         'admin-users': '用户管理'
       };
       return map[name] || '档案归档助手';
@@ -417,23 +437,18 @@ app.component('app-shell', {
           <div class="shell-nav-item" :class="{ 'is-active': navActive('workbench') }" role="button" tabindex="0"
                @click="go('#/workbench')" @keydown.enter="go('#/workbench')">工作台</div>
 
-          <div class="shell-nav-group">项目</div>
-          <div class="shell-nav-item" :class="{ 'is-active': navActive('home', '') }" role="button" tabindex="0"
-               @click="go('#/projects')" @keydown.enter="go('#/projects')">全部项目</div>
-          <div class="shell-nav-item" :class="{ 'is-active': navActive('home', 'tender') }" role="button" tabindex="0"
-               @click="go('#/projects/tender')" @keydown.enter="go('#/projects/tender')">招标项目</div>
-          <div class="shell-nav-item" :class="{ 'is-active': navActive('home', 'consult') }" role="button" tabindex="0"
-               @click="go('#/projects/consult')" @keydown.enter="go('#/projects/consult')">咨询项目</div>
-          <div class="shell-nav-item" :class="{ 'is-active': navActive('home', 'cost') }" role="button" tabindex="0"
-               @click="go('#/projects/cost')" @keydown.enter="go('#/projects/cost')">造价项目</div>
+          <div class="shell-nav-group">业务</div>
+          <div class="shell-nav-item" :class="{ 'is-active': navActive('home') }" role="button" tabindex="0"
+               @click="go('#/projects')" @keydown.enter="go('#/projects')">归档项目</div>
+          <div v-if="isAdmin" class="shell-nav-item" :class="{ 'is-active': navActive('admin-archives') }" role="button" tabindex="0"
+               @click="go('#/admin-archives')" @keydown.enter="go('#/admin-archives')">归档记录</div>
 
+          <div class="shell-nav-group">管理</div>
+          <div class="shell-nav-item" :class="{ 'is-active': navActive('master-projects') || navActive('master-project') }" role="button" tabindex="0"
+               @click="go('#/master-projects')" @keydown.enter="go('#/master-projects')">工程项目</div>
           <template v-if="isAdmin">
-            <div class="shell-nav-group">归档</div>
-            <div class="shell-nav-item" :class="{ 'is-active': navActive('admin-archives') }" role="button" tabindex="0"
-                 @click="go('#/admin-archives')" @keydown.enter="go('#/admin-archives')">归档记录</div>
             <div class="shell-nav-item" :class="{ 'is-active': navActive('admin-contracts') }" role="button" tabindex="0"
-                 @click="go('#/admin-contracts')" @keydown.enter="go('#/admin-contracts')">合同管理</div>
-            <div class="shell-nav-group">系统</div>
+                 @click="go('#/admin-contracts')" @keydown.enter="go('#/admin-contracts')">合同台账</div>
             <div class="shell-nav-item" :class="{ 'is-active': navActive('admin-users') }" role="button" tabindex="0"
                  @click="go('#/admin-users')" @keydown.enter="go('#/admin-users')">用户管理</div>
           </template>
@@ -456,7 +471,7 @@ app.component('app-shell', {
           <div class="shell-top-right">
             <form class="shell-search" @submit.prevent="submitSearch">
               <span class="lens" aria-hidden="true"></span>
-              <input v-model="searchText" type="search" placeholder="搜索项目名称 / 编号 / 负责人" aria-label="搜索项目" />
+              <input v-model="searchText" type="search" placeholder="搜索归档项目名称 / 编号 / 建设单位" aria-label="搜索归档项目" />
             </form>
             <span class="shell-top-user">{{ userLine }}</span>
             <el-button text @click="$emit('open-settings')">设置</el-button>
@@ -467,6 +482,337 @@ app.component('app-shell', {
         </div>
       </div>
     </div>
+  `
+});
+
+// ============================================
+// 工程项目选择器（输入即搜 + 就地新建）
+// ============================================
+
+app.component('master-project-picker', {
+  props: {
+    modelValue: { type: Object, default: null },
+    placeholder: { type: String, default: '搜索工程项目名称 / 建设单位 / 编号' },
+    allowNone: { type: Boolean, default: true },
+    noneText: { type: String, default: '暂不归属' }
+  },
+  emits: ['update:modelValue'],
+  data() {
+    return {
+      keyword: '',
+      open: false,
+      loading: false,
+      results: [],
+      creating: false,
+      creatingSaving: false,
+      newForm: { name: '', ownerName: '', projectNo: '' },
+      searchTimer: null
+    };
+  },
+  computed: {
+    selected() {
+      return this.modelValue || null;
+    }
+  },
+  watch: {
+    modelValue: {
+      immediate: true,
+      handler(val) {
+        this.keyword = val ? (val.name || '') : '';
+      }
+    }
+  },
+  mounted() {
+    this._onDocClick = (event) => {
+      if (!this.$refs.root) return;
+      if (!this.$refs.root.contains(event.target)) {
+        this.open = false;
+      }
+    };
+    document.addEventListener('mousedown', this._onDocClick);
+  },
+  beforeUnmount() {
+    if (this._onDocClick) document.removeEventListener('mousedown', this._onDocClick);
+    if (this.searchTimer) clearTimeout(this.searchTimer);
+  },
+  methods: {
+    onFocus() {
+      this.open = true;
+      this.doSearch();
+    },
+    openPicker() {
+      this.open = true;
+      this.$nextTick(() => this.doSearch());
+    },
+    onInput() {
+      this.open = true;
+      if (this.selected) this.$emit('update:modelValue', null);
+      if (this.searchTimer) clearTimeout(this.searchTimer);
+      this.searchTimer = setTimeout(() => this.doSearch(), 300);
+    },
+    async doSearch() {
+      const q = String(this.keyword || '').trim();
+      if (!q) {
+        this.results = [];
+        return;
+      }
+      this.loading = true;
+      try {
+        const res = await API.searchMasterProjects(q, 5);
+        this.results = res.items || [];
+      } catch (error) {
+        this.results = [];
+      }
+      this.loading = false;
+    },
+    select(item) {
+      this.keyword = item.name || '';
+      this.results = [];
+      this.open = false;
+      this.creating = false;
+      this.$emit('update:modelValue', {
+        id: item.id,
+        name: item.name,
+        ownerName: item.ownerName || '',
+        projectNo: item.projectNo || '',
+        archiveCount: item.archiveCount || 0
+      });
+    },
+    clearSelection() {
+      this.keyword = '';
+      this.results = [];
+      this.open = false;
+      this.creating = false;
+      this.$emit('update:modelValue', null);
+    },
+    startCreate() {
+      this.newForm = {
+        name: String(this.keyword || '').trim(),
+        ownerName: '',
+        projectNo: ''
+      };
+      this.creating = true;
+      this.open = false;
+    },
+    backToSearch() {
+      this.creating = false;
+      this.open = true;
+      this.doSearch();
+    },
+    async submitCreate() {
+      const name = String(this.newForm.name || '').trim();
+      if (!name) {
+        ElMessage.warning('请输入工程项目名称');
+        return;
+      }
+      this.creatingSaving = true;
+      try {
+        const created = await API.createMasterProject({
+          name,
+          ownerName: String(this.newForm.ownerName || '').trim(),
+          projectNo: String(this.newForm.projectNo || '').trim()
+        });
+        ElMessage.success('工程项目已创建并选中');
+        this.select(created);
+      } catch (error) {
+        ElMessage.error(error.message || '创建工程项目失败');
+      }
+      this.creatingSaving = false;
+    }
+  },
+  template: `
+    <div class="mp-picker" ref="root">
+      <div v-if="selected && !open" class="mp-selected">
+        <span class="mp-selected-name">{{ selected.name }}</span>
+        <span v-if="selected.ownerName" class="mp-selected-owner">{{ selected.ownerName }}</span>
+        <button type="button" class="mp-link" @click="openPicker">更换</button>
+        <button type="button" class="mp-link" @click="clearSelection">暂不归属</button>
+      </div>
+
+      <el-input
+        v-else
+        v-model="keyword"
+        :placeholder="placeholder"
+        clearable
+        @focus="onFocus"
+        @input="onInput"
+        @clear="clearSelection"
+      />
+
+      <div v-if="open && !creating" class="mp-panel">
+        <div class="mp-panel-hd">
+          <span v-if="loading">搜索中...</span>
+          <span v-else-if="keyword && results.length">匹配到 {{ results.length }} 个工程项目</span>
+          <span v-else-if="keyword">未匹配到工程项目</span>
+          <span v-else>输入关键词搜索工程项目</span>
+        </div>
+        <div v-if="loading" class="mp-loading">正在搜索...</div>
+        <template v-else>
+          <div
+            v-for="item in results"
+            :key="item.id"
+            class="mp-hit"
+            @click="select(item)"
+          >
+            <div class="mp-hit-info">
+              <div class="mp-hit-name">{{ item.name }}</div>
+              <div class="mp-hit-meta">
+                <span>{{ item.ownerName || '未填建设单位' }}</span>
+                <span>已有归档 {{ item.archiveCount || 0 }}</span>
+                <span v-if="item.projectNo">编号 {{ item.projectNo }}</span>
+              </div>
+            </div>
+            <el-button size="small">选择</el-button>
+          </div>
+          <div class="mp-new" @click="startCreate">
+            <span class="mp-plus">+</span>
+            新建工程项目「{{ keyword || '未命名' }}」
+          </div>
+          <div v-if="allowNone" class="mp-none">
+            <a href="javascript:;" @click="clearSelection">{{ noneText }}</a>
+            <span>不归属的归档不计入工程汇总，之后可在列表里补</span>
+          </div>
+        </template>
+      </div>
+
+      <div v-if="creating" class="mp-inline-new">
+        <div class="mp-inline-hd">
+          <b>新建工程项目</b>
+          <span>业主的立项工程，仅用于归档分组</span>
+        </div>
+        <div class="mp-inline-bd">
+          <div class="mp-field">
+            <label>工程项目名称 <i>*</i></label>
+            <el-input v-model="newForm.name" placeholder="如 G8517 屏山至兴义国家高速公路" />
+          </div>
+          <div class="mp-field-row">
+            <div class="mp-field">
+              <label>建设单位</label>
+              <el-input v-model="newForm.ownerName" placeholder="选填" />
+            </div>
+            <div class="mp-field">
+              <label>工程项目编号</label>
+              <el-input v-model="newForm.projectNo" placeholder="留空自动生成" />
+            </div>
+          </div>
+        </div>
+        <div class="mp-inline-ft">
+          <span class="mp-inline-hint">保存后自动选中，无需返回搜索</span>
+          <el-button size="small" @click="backToSearch">返回搜索</el-button>
+          <el-button size="small" type="primary" :loading="creatingSaving" @click="submitCreate">创建并选中</el-button>
+        </div>
+      </div>
+    </div>
+  `
+});
+
+// ============================================
+// 新建归档项目弹窗（服务类型 + 名称 + 所属工程项目）
+// ============================================
+
+app.component('archive-project-create-dialog', {
+  props: {
+    visible: { type: Boolean, default: false },
+    defaultCategory: { type: String, default: 'tender' },
+    presetMasterProject: { type: Object, default: null },
+    title: { type: String, default: '新建归档项目' }
+  },
+  emits: ['update:visible', 'created'],
+  data() {
+    return {
+      categoryCode: 'tender',
+      projectName: '',
+      masterProject: null,
+      submitting: false,
+      categoryOptions: [
+        { code: 'tender', label: '招标代理', desc: '招标文件、中标通知书' },
+        { code: 'cost', label: '造价咨询', desc: '清单、限价、结算' },
+        { code: 'consult', label: '咨询', desc: '工可、PPP、专项' }
+      ]
+    };
+  },
+  watch: {
+    visible(val) {
+      if (val) this.resetForm();
+    }
+  },
+  methods: {
+    resetForm() {
+      this.categoryCode = this.defaultCategory || 'tender';
+      this.projectName = '';
+      this.masterProject = this.presetMasterProject ? { ...this.presetMasterProject } : null;
+      this.submitting = false;
+    },
+    close() {
+      if (this.submitting) return;
+      this.$emit('update:visible', false);
+    },
+    async submit() {
+      const name = String(this.projectName || '').trim();
+      if (!name) {
+        ElMessage.warning('请输入归档项目名称');
+        return;
+      }
+      this.submitting = true;
+      try {
+        const projectId = await DB.createProject(name, this.categoryCode, {
+          masterProjectId: this.masterProject ? this.masterProject.id : ''
+        });
+        this.$emit('created', projectId);
+        this.$emit('update:visible', false);
+        ElMessage.success('归档项目已创建');
+      } catch (error) {
+        ElMessage.error(error.message || '创建归档项目失败');
+      }
+      this.submitting = false;
+    }
+  },
+  template: `
+    <el-dialog
+      :model-value="visible"
+      :title="title"
+      width="560px"
+      :close-on-click-modal="false"
+      @update:model-value="$emit('update:visible', $event)"
+    >
+      <div class="create-dialog">
+        <div class="create-field">
+          <div class="create-label"><i>*</i>服务类型</div>
+          <div class="create-service-cards">
+            <button
+              v-for="opt in categoryOptions"
+              :key="opt.code"
+              type="button"
+              class="create-service-card"
+              :class="{ on: categoryCode === opt.code }"
+              @click="categoryCode = opt.code"
+            >
+              <b>{{ opt.label }}</b>
+              <span>{{ opt.desc }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="create-field">
+          <div class="create-label"><i>*</i>归档项目名称</div>
+          <el-input v-model="projectName" placeholder="如 施工监理招标" maxlength="200" show-word-limit />
+        </div>
+
+        <div class="create-field">
+          <div class="create-label">所属工程项目 <span class="create-optional">选填</span></div>
+          <master-project-picker v-model="masterProject" />
+          <div class="create-hint">
+            归属后可在工程项目页汇总查看；暂不归属也可以正常归档，之后能在列表里补。
+          </div>
+        </div>
+      </div>
+
+      <template #footer>
+        <span class="create-foot-hint">创建后直接进入该归档项目的归档流程</span>
+        <el-button @click="close">取消</el-button>
+        <el-button type="primary" :loading="submitting" @click="submit">创建并开始归档</el-button>
+      </template>
+    </el-dialog>
   `
 });
 
@@ -582,36 +928,11 @@ app.component('workbench-page', {
       return String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
     },
     openCreate(category) {
-      this.createCategory = category;
-      this.newName = '未命名项目 ' + Utils.formatDate(new Date());
-      this.newRegion = '';
-      this.newProcurement = 'G';
+      this.createCategory = category || 'tender';
       this.showCreate = true;
     },
-    async createProject() {
-      const name = String(this.newName || '').trim();
-      if (!name) {
-        ElMessage.warning('请输入项目名称');
-        return;
-      }
-      if (!this.newRegion) {
-        ElMessage.warning('请选择所属地域');
-        return;
-      }
-      this.creating = true;
-      try {
-        const projectId = await DB.createProject(name, this.createCategory, {
-          region: this.newRegion,
-          procurementType: this.newProcurement
-        });
-        ElMessage.success('项目已创建');
-        this.showCreate = false;
-        window.navigateTo('#/project/' + projectId);
-      } catch (error) {
-        ElMessage.error(error.message || '创建项目失败');
-      } finally {
-        this.creating = false;
-      }
+    onProjectCreated(projectId) {
+      window.navigateTo('#/project/' + projectId);
     },
     async load() {
       this.loading = true;
@@ -688,38 +1009,18 @@ app.component('workbench-page', {
             <div class="wb-panel stagger" :class="{ 'is-in': entered }">
               <div class="wb-panel-head"><h2>快捷新建</h2></div>
               <div class="wb-quick">
-                <button class="primary" @click="openCreate('tender')"><span class="plus"></span>新建招标项目</button>
-                <button @click="openCreate('consult')"><span class="plus"></span>新建咨询项目</button>
-                <button @click="openCreate('cost')"><span class="plus"></span>新建造价项目</button>
+                <button class="primary" @click="openCreate('tender')"><span class="plus"></span>新建归档项目</button>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <el-dialog v-model="showCreate" :title="createTitle" width="480px">
-        <el-form label-width="88px">
-          <el-form-item label="项目名称" required>
-            <el-input v-model="newName" placeholder="输入项目名称" @keyup.enter="createProject" />
-          </el-form-item>
-          <el-form-item label="所属地域" required>
-            <el-select v-model="newRegion" placeholder="请选择省份" filterable style="width: 100%;">
-              <el-option v-for="p in provinceOptions" :key="p" :label="p" :value="p" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="采购类型" required>
-            <el-select v-model="newProcurement" style="width: 100%;">
-              <el-option label="工程(G)" value="G" />
-              <el-option label="货物(H)" value="H" />
-              <el-option label="服务(F)" value="F" />
-            </el-select>
-          </el-form-item>
-        </el-form>
-        <template #footer>
-          <el-button @click="showCreate = false">取消</el-button>
-          <el-button type="primary" :loading="creating" @click="createProject">创建</el-button>
-        </template>
-      </el-dialog>
+      <archive-project-create-dialog
+        v-model:visible="showCreate"
+        :default-category="createCategory"
+        @created="onProjectCreated"
+      />
     </div>
   `
 });
@@ -999,39 +1300,36 @@ app.component('settings-dialog', {
 app.component('home-page', {
   emits: ['open-settings'],
   props: {
-    currentUser: {
-      type: Object,
-      default: null
-    },
-    /** 侧栏进入的分类过滤：'' 表示全部 */
-    category: {
-      type: String,
-      default: ''
-    }
+    currentUser: { type: Object, default: null },
+    /** 兼容旧链接 #/projects/:category */
+    category: { type: String, default: '' }
   },
   data() {
     return {
-      projects: [],      // 项目列表数据
-      /** @type {Array<{ id: string, name: string, sortOrder: number }>} 可见部门骨架（含无项目） */
-      departments: [],
-      searchText: '',    // 搜索关键词
-      /** @type {string} 关键词限定字段 */
+      loading: true,
+      projects: [],
+      projectTotal: 0,
+      projectPage: 1,
+      projectPageSize: 20,
+      projectStats: { inProgress: 0, pendingReview: 0, reviewRejected: 0, pendingPaper: 0, archived: 0 },
+      categoryCounts: { all: 0, tender: 0, cost: 0, consult: 0 },
+      unassignedCount: 0,
+      categoryTab: '',
+
+      searchText: '',
       searchField: 'name_overview',
-      /** @type {Array<'tender'|'consult'|'cost'>} 项目类型多选筛选，空数组表示全部 */
-      filterCategoryList: [],
-      /** @type {string[]} 状态多选筛选 */
       filterStatusList: [],
-      /** @type {string[]} 所属地域多选筛选 */
-      filterRegionList: [],
-      /** @type {string[]} 招标类型/内容多选筛选 */
-      filterTenderTypeList: [],
-      /** @type {string[]} 项目类型多选筛选 */
-      filterProjectTypeList: [],
-      /** @type {string[]} 道路等级多选筛选 */
-      filterRoadLevelList: [],
-      /** @type {string[]} 行业多选筛选 */
-      filterIndustryList: [],
+      filterYearList: [],
+      filterOwnerList: [],
+      filterMasterProjectId: '',
+      knownOwners: [],
+
       showAdvancedFilters: false,
+      filterRegionList: [],
+      filterTenderTypeList: [],
+      filterProjectTypeList: [],
+      filterRoadLevelList: [],
+      filterIndustryList: [],
       dateField: 'winNoticeDate',
       dateFrom: '',
       dateTo: '',
@@ -1040,87 +1338,53 @@ app.component('home-page', {
       amountMax: '',
       mileageMin: '',
       mileageMax: '',
-      /** @type {{ inProgress: number, pendingReview: number, reviewRejected: number, archived: number }} */
-      projectStats: { inProgress: 0, pendingReview: 0, reviewRejected: 0, pendingPaper: 0, archived: 0 },
+
+      masterProjectOptions: [],
       searchDebounceTimer: null,
       _homeMounted: false,
-      showCreateDialog: false, // 新建项目弹窗开关
-      /** @type {'tender'|'consult'|'cost'} 当前新建对话框对应的业务分类 */
+
+      showCreateDialog: false,
       createCategoryCode: 'tender',
-      newProjectName: '', // 新建项目名称
-      newProjectRegion: '', // 新建所属地域
-      newProjectProcurementType: 'G', // 新建采购类型
-      creatingProject: false,
-      loading: true,     // 加载状态
-      projectPage: 1,
-      projectPageSize: 100,
-      projectTotal: 0,
-      /** @type {Record<string, boolean>} 折叠的部门 id → true */
-      collapsedDeptIds: {},
-      /** @type {Record<string, boolean>} 折叠的「部门+分类」键 → true */
-      collapsedCatKeys: {},
-      // ---- 调整归属弹窗 ----
-      showOwnershipDialog: false,
-      ownershipSaving: false,
-      ownershipLoadingUsers: false,
-      ownershipProject: null,
-      ownershipForm: {
-        departmentId: '',
-        ownerUserId: ''
-      },
-      ownershipUsers: []
+
+      showAssignDialog: false,
+      assignTarget: null,
+      assignMasterProject: null,
+      assigning: false
     };
   },
   computed: {
-    /**
-     * 非普通用户（roleCode !== 'user'），列表/统计可见全部项目
-     * @returns {boolean}
-     */
-    isPrivilegedUser() {
+    isAdmin() {
       const u = this.currentUser;
-      const code = u && (u.roleCode || u.role || 'user');
-      return code !== 'user';
+      return !!(u && (u.role === 'admin' || u.roleCode === 'admin'));
     },
-    /**
-     * 是否存在收窄列表的筛选条件（空状态多选视为全部状态，不算收窄）
-     * @returns {boolean}
-     */
-    hasNarrowingFilters() {
-      return !!(this.searchText || this.filterCategoryList.length > 0
-        || this.filterStatusList.length > 0 || this.filterRegionList.length > 0
-        || this.filterTenderTypeList.length > 0 || this.filterProjectTypeList.length > 0
-        || this.filterRoadLevelList.length > 0 || this.filterIndustryList.length > 0
-        || this.dateFrom || this.dateTo
-        || this.amountMin !== '' || this.amountMax !== ''
-        || this.mileageMin !== '' || this.mileageMax !== '');
-    },
-    searchFieldOptions() {
+    categoryTabs() {
       return [
-        { value: 'name_overview', label: '项目名称/概况' },
-        { value: 'projectManager', label: '项目负责人' },
-        { value: 'techManager', label: '技术负责人' }
+        { code: '', label: '全部', count: this.categoryCounts.all },
+        { code: 'tender', label: '招标代理', count: this.categoryCounts.tender },
+        { code: 'cost', label: '造价咨询', count: this.categoryCounts.cost },
+        { code: 'consult', label: '咨询', count: this.categoryCounts.consult }
       ];
     },
-    /**
-     * 可点状态统计 chips：标签、状态值与实时计数（点击即按状态筛选）
-     * @returns {Array<{ status: string, label: string, count: number }>}
-     */
-    statusChips() {
+    statusOptions() {
       return [
-        { status: 'draft', label: '待提交', count: this.projectStats.inProgress },
-        { status: 'pending_review', label: '待审核', count: this.projectStats.pendingReview },
-        { status: 'pending_paper', label: '待纸质核对', count: this.projectStats.pendingPaper },
-        { status: 'review_rejected', label: '审核驳回', count: this.projectStats.reviewRejected },
-        { status: 'archived', label: '已归档', count: this.projectStats.archived }
+        { value: 'draft', label: '草稿' },
+        { value: 'pending_review', label: '待审核' },
+        { value: 'review_rejected', label: '审核不通过' },
+        { value: 'pending_paper', label: '待纸质核对' },
+        { value: 'archived', label: '已归档' }
       ];
     },
-    /**
-     * 更多筛选面板中已生效的条件数（按钮徽标；项目分类仅在全部项目视图计入）
-     * @returns {number}
-     */
+    yearOptions() {
+      const current = new Date().getFullYear();
+      const years = [];
+      for (let i = 0; i < 8; i++) years.push(String(current - i));
+      return years;
+    },
+    ownerOptions() {
+      return this.knownOwners;
+    },
     advancedFilterCount() {
       let n = 0;
-      if (!this.category && this.filterCategoryList.length > 0) n += 1;
       if (this.filterRegionList.length > 0) n += 1;
       if (this.filterTenderTypeList.length > 0) n += 1;
       if (this.filterProjectTypeList.length > 0) n += 1;
@@ -1131,435 +1395,105 @@ app.component('home-page', {
       if (this.mileageMin !== '' || this.mileageMax !== '') n += 1;
       return n;
     },
-    dateFieldLabel() {
-      return this.dateField === 'entrustDate' ? '委托时间' : '中标通知书时间';
+    hasNarrowingFilters() {
+      return !!(this.searchText
+        || this.filterStatusList.length > 0
+        || this.filterYearList.length > 0
+        || this.filterOwnerList.length > 0
+        || this.filterMasterProjectId
+        || this.advancedFilterCount > 0);
     },
-    amountFieldLabel() {
-      return this.amountField === 'winAmount' ? '中标金额' : '项目总投资';
-    },
-    /**
-     * 已选条件 chips（仅面板内条件；状态筛选由常驻统计 chips 承担，不在此重复）
-     * @returns {Array<{ key: string, label: string }>}
-     */
-    activeFilterChips() {
-      const chips = [];
-      const catNames = { tender: '招标', consult: '咨询', cost: '造价' };
-      if (!this.category && this.filterCategoryList.length > 0) {
-        chips.push({ key: 'category', label: '项目分类：' + this.filterCategoryList.map((c) => catNames[c] || c).join('、') });
-      }
-      if (this.filterRegionList.length > 0) {
-        chips.push({ key: 'region', label: '所属地域：' + this.filterRegionList.join('、') });
-      }
-      if (this.filterTenderTypeList.length > 0) {
-        chips.push({ key: 'tenderType', label: '招标类型/内容：' + this.filterTenderTypeList.join('、') });
-      }
-      if (this.filterProjectTypeList.length > 0) {
-        chips.push({ key: 'projectType', label: '项目类型：' + this.filterProjectTypeList.join('、') });
-      }
-      if (this.filterRoadLevelList.length > 0) {
-        chips.push({ key: 'roadLevel', label: '道路等级：' + this.filterRoadLevelList.join('、') });
-      }
-      if (this.filterIndustryList.length > 0) {
-        chips.push({ key: 'industry', label: '行业：' + this.filterIndustryList.join('、') });
-      }
-      if (this.dateFrom || this.dateTo) {
-        chips.push({ key: 'date', label: this.dateFieldLabel + '：' + (this.dateFrom || '不限') + ' ~ ' + (this.dateTo || '不限') });
-      }
-      if (this.amountMin !== '' || this.amountMax !== '') {
-        chips.push({ key: 'amount', label: this.amountFieldLabel + '（万元）：' + (this.amountMin || '不限') + ' ~ ' + (this.amountMax || '不限') });
-      }
-      if (this.mileageMin !== '' || this.mileageMax !== '') {
-        chips.push({ key: 'mileage', label: '里程（公里）：' + (this.mileageMin || '不限') + ' ~ ' + (this.mileageMax || '不限') });
-      }
-      return chips;
-    },
-    tenderTypeFilterOptions() {
-      return Utils.ENUMS.tenderType || [];
-    },
-    projectTypeFilterOptions() {
-      return Utils.ENUMS.projectType || [];
-    },
-    roadLevelFilterOptions() {
-      return Utils.ENUMS.roadLevel || [];
-    },
-    industryFilterOptions() {
-      return Utils.ENUMS.industry || [];
-    },
-    /**
-     * 所属地域选项（省份列表）
-     * @returns {string[]}
-     */
-    provinceOptions() {
-      return Utils.PROVINCES;
-    },
-    /**
-     * 符合条件的项目超过一页时显示分页
-     * @returns {boolean}
-     */
-    showProjectPagination() {
-      return this.projectTotal > this.projectPageSize;
-    },
-    /**
-     * 按所属部门分组，部门内再按业务分类（招标/咨询/造价）分子组
-     * 有搜索词或分类/状态筛选时仅展示有匹配项目的部门；否则展示全部可见部门（含空部门）
-     * 分类子组仅展示有项目的分类
-     * @returns {Array<{
-     *   departmentId: string,
-     *   departmentName: string,
-     *   departmentSortOrder: number,
-     *   projects: Array,
-     *   categories: Array<{ categoryId: string, categoryCode: string, categoryName: string, categorySortOrder: number, projects: Array }>
-     * }>}
-     */
-    groupedProjects() {
-      const groups = new Map();
-      const filtering = this.hasNarrowingFilters;
-
-      if (!filtering) {
-        for (const dept of this.departments) {
-          groups.set(dept.id, {
-            departmentId: dept.id,
-            departmentName: dept.name,
-            departmentSortOrder: Number.isFinite(dept.sortOrder) ? dept.sortOrder : 0,
-            projects: [],
-            categories: []
-          });
-        }
-      }
-
-      for (const project of this.projects) {
-        const departmentId = project.departmentId || '_none';
-        const departmentName = project.departmentName || '未分配部门';
-        const departmentSortOrder = departmentId === '_none'
-          ? Number.MAX_SAFE_INTEGER
-          : (Number.isFinite(project.departmentSortOrder)
-            ? project.departmentSortOrder
-            : Number.MAX_SAFE_INTEGER);
-        if (!groups.has(departmentId)) {
-          groups.set(departmentId, {
-            departmentId,
-            departmentName,
-            departmentSortOrder,
-            projects: [],
-            categories: []
-          });
-        }
-        groups.get(departmentId).projects.push(project);
-      }
-
-      const deptGroups = Array.from(groups.values()).sort((a, b) => {
-        if (a.departmentSortOrder !== b.departmentSortOrder) {
-          return a.departmentSortOrder - b.departmentSortOrder;
-        }
-        return String(a.departmentName).localeCompare(String(b.departmentName), 'zh');
-      });
-
-      for (const group of deptGroups) {
-        const catMap = new Map();
-        for (const project of group.projects) {
-          const categoryId = project.categoryId || 'cat_tender';
-          const categoryCode = project.categoryCode || 'tender';
-          const categoryName = project.categoryName || '招标';
-          const categorySortOrder = Number.isFinite(project.categorySortOrder)
-            ? project.categorySortOrder
-            : 1;
-          if (!catMap.has(categoryId)) {
-            catMap.set(categoryId, {
-              categoryId,
-              categoryCode,
-              categoryName,
-              categorySortOrder,
-              projects: []
-            });
-          }
-          catMap.get(categoryId).projects.push(project);
-        }
-        group.categories = Array.from(catMap.values()).sort((a, b) => {
-          if (a.categorySortOrder !== b.categorySortOrder) {
-            return a.categorySortOrder - b.categorySortOrder;
-          }
-          return String(a.categoryName).localeCompare(String(b.categoryName), 'zh');
-        });
-      }
-
-      return deptGroups;
-    },
-    /**
-     * 新建弹窗标题（分类在弹窗内选择，标题保持通用）
-     * @returns {string}
-     */
-    createDialogTitle() {
-      return '新建项目';
-    },
-    /**
-     * 当前用户是否为管理员
-     * @returns {boolean}
-     */
-    isAdmin() {
-      const u = this.currentUser;
-      return !!(u && (u.role === 'admin' || u.roleCode === 'admin'));
-    }
+    tenderTypeFilterOptions() { return Utils.ENUMS.tenderType || []; },
+    projectTypeFilterOptions() { return Utils.ENUMS.projectType || []; },
+    roadLevelFilterOptions() { return Utils.ENUMS.roadLevel || []; },
+    industryFilterOptions() { return Utils.ENUMS.industry || []; },
+    provinceOptions() { return Utils.PROVINCES; }
   },
   watch: {
-    filterCategoryList() {
+    category(val) {
+      this.categoryTab = val || '';
       if (!this._homeMounted) return;
-      this.projectPage = 1;
-      this.saveHomeFilters();
-      this.loadProjects();
-    },
-    filterStatusList() {
-      if (!this._homeMounted) return;
-      this.projectPage = 1;
-      this.saveHomeFilters();
-      this.loadProjects();
-    },
-    filterRegionList() {
-      if (!this._homeMounted) return;
-      this.projectPage = 1;
-      this.saveHomeFilters();
-      this.loadProjects();
-    },
-    filterTenderTypeList() {
-      if (!this._homeMounted) return;
-      this.projectPage = 1;
-      this.saveHomeFilters();
-      this.loadProjects();
-    },
-    filterProjectTypeList() {
-      if (!this._homeMounted) return;
-      this.projectPage = 1;
-      this.saveHomeFilters();
-      this.loadProjects();
-    },
-    filterRoadLevelList() {
-      if (!this._homeMounted) return;
-      this.projectPage = 1;
-      this.saveHomeFilters();
-      this.loadProjects();
-    },
-    filterIndustryList() {
-      if (!this._homeMounted) return;
-      this.projectPage = 1;
-      this.saveHomeFilters();
-      this.loadProjects();
-    },
-    searchField() {
-      if (!this._homeMounted) return;
-      this.projectPage = 1;
-      this.saveHomeFilters();
-      this.loadProjects();
-    },
-    dateField() { this._onAdvancedFilterChange(); },
-    dateFrom() { this._onAdvancedFilterChange(); },
-    dateTo() { this._onAdvancedFilterChange(); },
-    amountField() { this._onAdvancedFilterChange(); },
-    amountMin() { this._onAdvancedFilterChange(); },
-    amountMax() { this._onAdvancedFilterChange(); },
-    mileageMin() { this._onAdvancedFilterChange(); },
-    mileageMax() { this._onAdvancedFilterChange(); },
-    searchText() {
-      if (!this._homeMounted) return;
-      this.projectPage = 1;
-      if (this.searchDebounceTimer) {
-        clearTimeout(this.searchDebounceTimer);
-      }
-      this.searchDebounceTimer = setTimeout(() => {
-        this.saveHomeFilters();
-        this.loadProjects();
-      }, 300);
-    },
-    /**
-     * 侧栏切换分类：同一组件实例复用，需重新应用过滤
-     * （本 watcher 原本写在第二个 watch 块里，JS 对象重复键会覆盖前一个 watch 块，
-     *   导致筛选/搜索监听全部失效，已合并至此——勿再拆出第二个 watch 块）
-     */
-    category() {
-      if (this.category) {
-        this.applyRouteCategory();
-      } else {
-        this.filterCategoryList = [];
-      }
       this.projectPage = 1;
       this.loadProjects();
     }
   },
   async mounted() {
-    if (this.category) {
-      this.applyRouteCategory();
-    } else {
-      this.initHomeFilters();
-    }
-    this.applyPendingShellSearch();
-    this._onShellSearch = (event) => {
-      this.applyShellSearch(event.detail);
-    };
-    window.addEventListener('shell-search', this._onShellSearch);
-    await this.loadProjects();
+    this.categoryTab = this.category || '';
+    await Promise.all([this.loadProjects(), this.loadMasterProjectOptions()]);
     this._homeMounted = true;
   },
-  beforeUnmount() {
-    if (this._onShellSearch) {
-      window.removeEventListener('shell-search', this._onShellSearch);
-    }
-  },
   methods: {
-    /**
-     * 按侧栏分类路由应用过滤（显示该分类全部状态）
-     */
-    applyRouteCategory() {
-      this.applyDefaultFilters();
-      this.filterCategoryList = [this.category];
-      this.filterStatusList = [];
-    },
-    /**
-     * 消费顶栏搜索留下的待应用关键词
-     */
-    applyPendingShellSearch() {
-      if (typeof window.__pendingProjectSearch === 'string') {
-        const text = window.__pendingProjectSearch;
-        window.__pendingProjectSearch = undefined;
-        if (text) {
-          this.searchText = text;
-        }
-      }
-    },
-    /**
-     * 顶栏搜索事件（已在列表页时）
-     * @param {string} keyword
-     */
-    applyShellSearch(keyword) {
-      this.searchText = String(keyword || '');
-      this.projectPage = 1;
-      this.saveHomeFilters();
-      this.loadProjects();
-    },
-    /**
-     * 高级筛选变更（防抖）
-     */
-    _onAdvancedFilterChange() {
-      if (!this._homeMounted) return;
-      this.projectPage = 1;
-      if (this.searchDebounceTimer) {
-        clearTimeout(this.searchDebounceTimer);
-      }
-      this.searchDebounceTimer = setTimeout(() => {
-        this.saveHomeFilters();
-        this.loadProjects();
-      }, 300);
-    },
-    /**
-     * 导航到指定路径
-     * @param {string} path
-     */
     navigateTo(path) {
       window.navigateTo(path);
     },
-    /**
-     * 初始化筛选：有会话缓存则恢复，否则按角色应用默认值
-     */
-    initHomeFilters() {
-      const cached = window.HomeFilterStorage
-        ? window.HomeFilterStorage.load(this.currentUser)
-        : null;
-      if (cached) {
-        this.applyFilterState(cached);
-        return;
+    statusLabel(status) {
+      const map = {
+        draft: '草稿',
+        pending_review: '待审核',
+        review_rejected: '审核不通过',
+        review_approved: '审核通过',
+        pending_paper: '待纸质核对',
+        archived: '已归档'
+      };
+      return map[status] || status || '—';
+    },
+    statusClass(status) {
+      return 'ap-chip ap-chip--' + (status || 'draft');
+    },
+    shortDate(value) {
+      if (!value) return '—';
+      const date = new Date(value);
+      if (isNaN(date.getTime())) return '—';
+      return String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
+    },
+    projectSub(row) {
+      const parts = [];
+      let segments = [];
+      try {
+        segments = typeof row.segments === 'string' ? JSON.parse(row.segments || '[]') : (row.segments || []);
+      } catch (e) { segments = []; }
+      if (Array.isArray(segments) && segments.length > 1) parts.push(segments.length + ' 个标段');
+      if (row.region) parts.push(row.region);
+      return parts.join(' · ');
+    },
+    canChangeMaster(project) {
+      if (!project || !this.currentUser) return false;
+      if (this.isAdmin) return true;
+      return project.createdBy === this.currentUser.id;
+    },
+    canDeleteProject(project) {
+      if (!project) return false;
+      if (project.status === 'pending_review' || project.status === 'pending_paper') return false;
+      if (project.status === 'archived') return this.isAdmin;
+      return true;
+    },
+    goDetail(project) {
+      this.navigateTo('#/project/' + project.projectId);
+    },
+    async loadMasterProjectOptions() {
+      try {
+        const res = await API.listMasterProjects({ page: 1, pageSize: 500 });
+        this.masterProjectOptions = res.items || [];
+      } catch (error) {
+        this.masterProjectOptions = [];
       }
-      this.applyDefaultFilters();
     },
-    /**
-     * @param {Object} state
-     */
-    applyFilterState(state) {
-      this.searchText = state.searchText || '';
-      this.searchField = state.searchField || 'name_overview';
-      this.filterCategoryList = state.filterCategoryList || [];
-      this.filterStatusList = state.filterStatusList || [];
-      this.filterRegionList = state.filterRegionList || [];
-      this.filterTenderTypeList = state.filterTenderTypeList || [];
-      this.filterProjectTypeList = state.filterProjectTypeList || [];
-      this.filterRoadLevelList = state.filterRoadLevelList || [];
-      this.filterIndustryList = state.filterIndustryList || [];
-      this.showAdvancedFilters = !!state.showAdvancedFilters;
-      this.dateField = state.dateField || 'winNoticeDate';
-      this.dateFrom = state.dateFrom || '';
-      this.dateTo = state.dateTo || '';
-      this.amountField = state.amountField || 'totalInvestment';
-      this.amountMin = state.amountMin !== undefined && state.amountMin !== null ? state.amountMin : '';
-      this.amountMax = state.amountMax !== undefined && state.amountMax !== null ? state.amountMax : '';
-      this.mileageMin = state.mileageMin !== undefined && state.mileageMin !== null ? state.mileageMin : '';
-      this.mileageMax = state.mileageMax !== undefined && state.mileageMax !== null ? state.mileageMax : '';
-      this.projectPage = state.projectPage || 1;
-    },
-    /**
-     * 按角色重置全部筛选为默认值（新登录、无缓存时使用）
-     */
-    applyDefaultFilters() {
-      this.searchText = '';
-      this.searchField = 'name_overview';
-      this.filterCategoryList = [];
-      this.filterRegionList = [];
-      this.filterTenderTypeList = [];
-      this.filterProjectTypeList = [];
-      this.filterRoadLevelList = [];
-      this.filterIndustryList = [];
-      this.showAdvancedFilters = false;
-      this.dateField = 'winNoticeDate';
-      this.dateFrom = '';
-      this.dateTo = '';
-      this.amountField = 'totalInvestment';
-      this.amountMin = '';
-      this.amountMax = '';
-      this.mileageMin = '';
-      this.mileageMax = '';
-      this.projectPage = 1;
-      this.filterStatusList = this.isPrivilegedUser
-        ? ['pending_review', 'pending_paper']
-        : ['pending_review', 'review_rejected'];
-    },
-    /**
-     * 将当前筛选写入 sessionStorage（登录会话内有效）
-     */
-    saveHomeFilters() {
-      if (!this.currentUser || !window.HomeFilterStorage) return;
-      window.HomeFilterStorage.save(this.currentUser, {
-        searchText: this.searchText,
-        searchField: this.searchField,
-        filterCategoryList: this.filterCategoryList,
-        filterStatusList: this.filterStatusList,
-        filterRegionList: this.filterRegionList,
-        filterTenderTypeList: this.filterTenderTypeList,
-        filterProjectTypeList: this.filterProjectTypeList,
-        filterRoadLevelList: this.filterRoadLevelList,
-        filterIndustryList: this.filterIndustryList,
-        showAdvancedFilters: this.showAdvancedFilters,
-        dateField: this.dateField,
-        dateFrom: this.dateFrom,
-        dateTo: this.dateTo,
-        amountField: this.amountField,
-        amountMin: this.amountMin,
-        amountMax: this.amountMax,
-        mileageMin: this.mileageMin,
-        mileageMax: this.mileageMax,
-        projectPage: this.projectPage
-      });
-    },
-    /**
-     * 从后端加载项目列表、可见部门与全局统计
-     */
     async loadProjects() {
       this.loading = true;
       try {
         const result = await DB.getProjects({
           search: this.searchText,
           searchField: this.searchField,
-          categoryCodes: this.filterCategoryList,
+          categoryCodes: this.categoryTab ? [this.categoryTab] : [],
           statuses: this.filterStatusList,
           regions: this.filterRegionList,
           tenderTypes: this.filterTenderTypeList,
           projectTypes: this.filterProjectTypeList,
           roadLevels: this.filterRoadLevelList,
           industries: this.filterIndustryList,
+          years: this.filterYearList,
+          ownerNames: this.filterOwnerList,
+          masterProjectId: this.filterMasterProjectId,
           page: this.projectPage,
           pageSize: this.projectPageSize,
           dateField: this.dateField,
@@ -1572,58 +1506,49 @@ app.component('home-page', {
           mileageMax: this.mileageMax
         });
         this.projects = result.projects || [];
-        this.departments = result.departments || [];
         this.projectTotal = result.total || 0;
         this.projectPage = result.page || this.projectPage;
-        this.projectStats = result.stats || { inProgress: 0, pendingReview: 0, reviewRejected: 0, pendingPaper: 0, archived: 0 };
-        this.projects.sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
-        this.syncDefaultCollapseState();
+        this.projectStats = result.stats || this.projectStats;
+        this.categoryCounts = result.categoryCounts || this.categoryCounts;
+        this.unassignedCount = result.unassignedCount || 0;
+        const owners = new Set(this.knownOwners);
+        for (const p of this.projects) {
+          if (p.createdByName) owners.add(p.createdByName);
+        }
+        this.knownOwners = Array.from(owners).sort((a, b) => String(a).localeCompare(String(b), 'zh'));
       } catch (error) {
-        ElMessage.error('加载项目列表失败: ' + error.message);
+        ElMessage.error('加载归档项目失败: ' + error.message);
       }
       this.loading = false;
     },
-    /**
-     * 切换更多筛选面板
-     */
-    toggleAdvancedFilters() {
-      this.showAdvancedFilters = !this.showAdvancedFilters;
-      this.saveHomeFilters();
+    switchCategory(code) {
+      if (this.categoryTab === code) return;
+      this.categoryTab = code;
+      this.projectPage = 1;
+      this.loadProjects();
     },
-    /**
-     * 点击状态统计 chip：切换对应状态筛选（由 watcher 触发重新加载）
-     * @param {string} status
-     */
-    toggleStatusChip(status) {
-      const i = this.filterStatusList.indexOf(status);
-      if (i >= 0) {
-        this.filterStatusList.splice(i, 1);
-      } else {
-        this.filterStatusList.push(status);
-      }
+    onFilterChange() {
+      this.projectPage = 1;
+      this.loadProjects();
     },
-    /**
-     * 移除单个已选条件 chip（清空对应字段，由 watcher 触发重新加载）
-     * @param {{ key: string }} chip
-     */
-    removeFilterChip(chip) {
-      switch (chip.key) {
-        case 'category': this.filterCategoryList = []; break;
-        case 'region': this.filterRegionList = []; break;
-        case 'tenderType': this.filterTenderTypeList = []; break;
-        case 'projectType': this.filterProjectTypeList = []; break;
-        case 'roadLevel': this.filterRoadLevelList = []; break;
-        case 'industry': this.filterIndustryList = []; break;
-        case 'date': this.dateFrom = ''; this.dateTo = ''; break;
-        case 'amount': this.amountMin = ''; this.amountMax = ''; break;
-        case 'mileage': this.mileageMin = ''; this.mileageMax = ''; break;
-      }
+    onSearchInput() {
+      if (this.searchDebounceTimer) clearTimeout(this.searchDebounceTimer);
+      this.searchDebounceTimer = setTimeout(() => {
+        this.projectPage = 1;
+        this.loadProjects();
+      }, 300);
     },
-    /**
-     * 清空更多筛选面板内的全部条件（不影响关键词与状态 chips；分类路由下保留路由分类）
-     */
-    clearPanelFilters() {
-      if (!this.category) this.filterCategoryList = [];
+    showUnassigned() {
+      this.filterMasterProjectId = 'unassigned';
+      this.projectPage = 1;
+      this.loadProjects();
+    },
+    resetFilters() {
+      this.searchText = '';
+      this.filterStatusList = [];
+      this.filterYearList = [];
+      this.filterOwnerList = [];
+      this.filterMasterProjectId = '';
       this.filterRegionList = [];
       this.filterTenderTypeList = [];
       this.filterProjectTypeList = [];
@@ -1635,610 +1560,218 @@ app.component('home-page', {
       this.amountMax = '';
       this.mileageMin = '';
       this.mileageMax = '';
-    },
-    /**
-     * 项目列表翻页
-     * @param {number} page
-     */
-    onProjectPageChange(page) {
-      this.projectPage = page;
-      this.saveHomeFilters();
+      this.projectPage = 1;
       this.loadProjects();
     },
-    /**
-     * 打开新建项目弹窗，默认名称为"未命名项目 + 当天日期"
-     * @param {'tender'|'consult'|'cost'} [categoryCode='tender']
-     */
-    openCreateDialog(categoryCode = 'tender') {
+    onProjectPageChange(page) {
+      this.projectPage = page;
+      this.loadProjects();
+    },
+    openCreateDialog(categoryCode) {
       this.createCategoryCode = categoryCode || 'tender';
-      this.newProjectName = '未命名项目 ' + Utils.formatDate(new Date());
-      this.newProjectRegion = '';
-      this.newProjectProcurementType = 'G';
       this.showCreateDialog = true;
     },
-    /**
-     * 采购类型展示文案
-     * @param {string} code
-     * @returns {string}
-     */
-    procurementTypeLabel(code) {
-      const map = { G: '工程(G)', H: '货物(H)', F: '服务(F)' };
-      return map[code] || code || '';
+    async onProjectCreated(projectId) {
+      await this.loadMasterProjectOptions();
+      this.navigateTo('#/project/' + projectId);
     },
-    /**
-     * 创建新项目并跳转到项目详情页（咨询/造价暂复用招标详情流程）
-     * 创建前确认所属地域、采购类型（创建后普通用户不可改）
-     */
-    async createProject() {
-      const name = String(this.newProjectName || '').trim();
-      if (!name) {
-        ElMessage.warning('请输入项目名称');
+    openAssignDialog(project) {
+      if (!this.canChangeMaster(project)) {
+        ElMessage.warning('仅创建人或管理员可修改工程归属');
         return;
       }
-      if (!this.newProjectRegion) {
-        ElMessage.warning('请选择所属地域');
-        return;
-      }
-      if (!this.newProjectProcurementType) {
-        ElMessage.warning('请选择采购类型');
-        return;
-      }
-
-      const typeLabel = this.procurementTypeLabel(this.newProjectProcurementType);
-      try {
-        await ElMessageBox.confirm(
-          `确认所属地域：${this.newProjectRegion}、采购类型：${typeLabel}？创建后不可修改，并将生成项目编号。`,
-          '确认创建',
-          {
-            confirmButtonText: '确认创建',
-            cancelButtonText: '返回修改',
-            type: 'warning'
+      this.assignTarget = project;
+      this.assignMasterProject = project.masterProjectId
+        ? {
+            id: project.masterProjectId,
+            name: project.masterProjectName,
+            ownerName: project.masterProjectOwnerName || project.ownerNameSnapshot || '',
+            projectNo: project.masterProjectNo || ''
           }
+        : null;
+      this.showAssignDialog = true;
+    },
+    async submitAssign() {
+      if (!this.assignTarget) return;
+      this.assigning = true;
+      try {
+        await DB.changeProjectMasterProject(
+          this.assignTarget.projectId,
+          this.assignMasterProject ? this.assignMasterProject.id : null,
+          this.assignMasterProject ? (this.assignMasterProject.ownerName || '') : ''
         );
-      } catch {
-        return;
-      }
-
-      this.creatingProject = true;
-      try {
-        const projectId = await DB.createProject(name, this.createCategoryCode, {
-          region: this.newProjectRegion,
-          procurementType: this.newProjectProcurementType
-        });
-        this.showCreateDialog = false;
-        this.navigateTo('#/project/' + projectId);
-      } catch (error) {
-        ElMessage.error('创建项目失败: ' + error.message);
-      }
-      this.creatingProject = false;
-    },
-    /**
-     * 删除项目（带二次确认）
-     * @param {string} projectId
-     */
-    async deleteProject(projectId) {
-      await ElMessageBox.confirm('确定要删除此项目吗？删除后不可恢复。', '确认删除', {
-        confirmButtonText: '删除',
-        cancelButtonText: '取消',
-        type: 'warning'
-      });
-      try {
-        await DB.deleteProject(projectId);
-        await this.loadProjects();
-        ElMessage.success('项目已删除');
-      } catch (error) {
-        ElMessage.error('删除项目失败: ' + error.message);
-      }
-    },
-    /**
-     * 将日期字符串转换为相对时间描述
-     * @param {string} dateStr - ISO 日期字符串
-     * @returns {string} 相对时间描述
-     */
-    getRelativeTime(dateStr) {
-      const date = new Date(dateStr);
-      const now = new Date();
-      const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24));
-      if (diffDays === 0) return '今天';
-      if (diffDays === 1) return '昨天';
-      if (diffDays < 30) return diffDays + '天前';
-      return Math.floor(diffDays / 30) + '月前';
-    },
-    /**
-     * 卡片底部左侧：更新时间 · 最后更新者
-     * @param {Object} project
-     * @returns {string}
-     */
-    getProjectUpdateLine(project) {
-      const time = this.getRelativeTime(project.updatedAt);
-      const updater = project.updatedByName || project.createdByName || '未知';
-      return `更新: ${time} · ${updater}`;
-    },
-    /**
-     * 是否可删除项目（按状态与角色）
-     * @param {Object} project
-     * @returns {boolean}
-     */
-    canDeleteProject(project) {
-      if (!project) return false;
-      if (project.status === 'pending_review') return false;
-      if (project.status === 'pending_paper') return false;
-      if (project.status === 'archived') return this.isAdmin;
-      if (project.status === 'draft' || project.status === 'review_rejected') return true;
-      // 未知状态：仅管理员
-      return this.isAdmin;
-    },
-    /**
-     * 是否可调整归属（管理员 + 未归档）
-     * @param {Object} project
-     * @returns {boolean}
-     */
-    canReassignOwnership(project) {
-      return this.isAdmin && project
-        && project.status !== 'archived'
-        && project.status !== 'pending_review'
-        && project.status !== 'pending_paper';
-    },
-    /**
-     * 打开调整归属弹窗
-     * @param {Object} project
-     */
-    async openOwnershipDialog(project) {
-      if (!this.canReassignOwnership(project)) return;
-      this.ownershipProject = project;
-      this.ownershipForm = {
-        departmentId: project.departmentId || '',
-        ownerUserId: ''
-      };
-      this.ownershipUsers = [];
-      this.showOwnershipDialog = true;
-      if (this.ownershipForm.departmentId) {
-        await this.loadOwnershipUsers(this.ownershipForm.departmentId);
-        // 若原归属人仍在该部门，预选
-        if (project.createdBy && this.ownershipUsers.some((u) => u.id === project.createdBy)) {
-          this.ownershipForm.ownerUserId = project.createdBy;
-        }
-      }
-    },
-    /**
-     * 归属弹窗：部门变更时重新加载人员
-     */
-    async onOwnershipDepartmentChange(departmentId) {
-      this.ownershipForm.ownerUserId = '';
-      this.ownershipUsers = [];
-      if (departmentId) {
-        await this.loadOwnershipUsers(departmentId);
-      }
-    },
-    /**
-     * 加载指定部门下的启用用户
-     * @param {string} departmentId
-     */
-    async loadOwnershipUsers(departmentId) {
-      this.ownershipLoadingUsers = true;
-      try {
-        const result = await API.listUsers(1, 100, '', departmentId);
-        const items = result.list || result.items || result.users || [];
-        this.ownershipUsers = items.filter((u) => (u.status || 'active') === 'active');
-      } catch (error) {
-        this.ownershipUsers = [];
-        ElMessage.error('加载部门人员失败: ' + error.message);
-      }
-      this.ownershipLoadingUsers = false;
-    },
-    /**
-     * 提交调整归属
-     */
-    async submitOwnership() {
-      if (!this.ownershipProject) return;
-      if (!this.ownershipForm.departmentId) {
-        ElMessage.warning('请选择新部门');
-        return;
-      }
-      if (!this.ownershipForm.ownerUserId) {
-        ElMessage.warning('请选择归属人');
-        return;
-      }
-      this.ownershipSaving = true;
-      try {
-        await DB.reassignProjectOwnership(this.ownershipProject.projectId, {
-          departmentId: this.ownershipForm.departmentId,
-          ownerUserId: this.ownershipForm.ownerUserId
-        });
-        this.showOwnershipDialog = false;
-        ElMessage.success('项目归属已调整');
+        this.showAssignDialog = false;
+        ElMessage.success('工程归属已更新');
         await this.loadProjects();
       } catch (error) {
-        ElMessage.error('调整归属失败: ' + error.message);
+        ElMessage.error(error.message || '更新归属失败');
       }
-      this.ownershipSaving = false;
+      this.assigning = false;
     },
-    /**
-     * 默认仅展开第一个有项目的部门及其第一个分类，空部门与其余组均折叠
-     */
-    syncDefaultCollapseState() {
-      const groups = this.groupedProjects;
-      const deptCollapsed = {};
-      const catCollapsed = {};
-      const firstDeptWithProjectsIndex = groups.findIndex((g) => g.projects.length > 0);
-
-      groups.forEach((group, deptIndex) => {
-        const expandDept = deptIndex === firstDeptWithProjectsIndex && firstDeptWithProjectsIndex !== -1;
-        if (!expandDept) {
-          deptCollapsed[group.departmentId] = true;
-        }
-        group.categories.forEach((cat, catIndex) => {
-          if (!expandDept || catIndex > 0) {
-            catCollapsed[this.catCollapseKey(group.departmentId, cat.categoryId)] = true;
-          }
+    async deleteProject(project) {
+      try {
+        await ElMessageBox.confirm('确定要删除此归档项目吗？删除后不可恢复。', '确认删除', {
+          confirmButtonText: '删除',
+          cancelButtonText: '取消',
+          type: 'warning'
         });
-      });
-
-      this.collapsedDeptIds = deptCollapsed;
-      this.collapsedCatKeys = catCollapsed;
-    },
-    /**
-     * 部门分组是否已折叠
-     * @param {string} departmentId
-     * @returns {boolean}
-     */
-    isDeptCollapsed(departmentId) {
-      return !!this.collapsedDeptIds[departmentId];
-    },
-    /**
-     * 切换部门分组折叠状态
-     * @param {string} departmentId
-     */
-    toggleDeptCollapse(departmentId) {
-      this.collapsedDeptIds = {
-        ...this.collapsedDeptIds,
-        [departmentId]: !this.collapsedDeptIds[departmentId]
-      };
-    },
-    /**
-     * 部门内分类子组折叠键
-     * @param {string} departmentId
-     * @param {string} categoryId
-     * @returns {string}
-     */
-    catCollapseKey(departmentId, categoryId) {
-      return departmentId + '::' + categoryId;
-    },
-    /**
-     * 分类子组是否已折叠
-     * @param {string} departmentId
-     * @param {string} categoryId
-     * @returns {boolean}
-     */
-    isCatCollapsed(departmentId, categoryId) {
-      return !!this.collapsedCatKeys[this.catCollapseKey(departmentId, categoryId)];
-    },
-    /**
-     * 切换分类子组折叠状态
-     * @param {string} departmentId
-     * @param {string} categoryId
-     */
-    toggleCatCollapse(departmentId, categoryId) {
-      const key = this.catCollapseKey(departmentId, categoryId);
-      this.collapsedCatKeys = {
-        ...this.collapsedCatKeys,
-        [key]: !this.collapsedCatKeys[key]
-      };
+      } catch (e) {
+        return;
+      }
+      try {
+        await DB.deleteProject(project.projectId);
+        ElMessage.success('归档项目已删除');
+        await this.loadProjects();
+      } catch (error) {
+        ElMessage.error('删除失败: ' + error.message);
+      }
     }
   },
   template: `
-    <div class="page-container">
-      <!-- 按部门分组的项目列表（部门内再按分类） -->
-      <div class="project-list" v-loading="loading">
-        <div v-if="showProjectPagination" class="project-list-pagination">
-          <el-pagination
-            v-model:current-page="projectPage"
-            :page-size="projectPageSize"
-            :total="projectTotal"
-            layout="total, prev, pager, next"
-            @current-change="onProjectPageChange"
-          />
-        </div>
-        <!-- 常驻筛选栏：组合搜索 + 可点状态统计 + 更多筛选 + 新建 -->
-        <div class="home-filter-bar">
-          <div class="combo-search">
-            <el-select v-model="searchField" class="combo-search-field">
-              <el-option
-                v-for="opt in searchFieldOptions"
-                :key="opt.value"
-                :label="opt.label"
-                :value="opt.value"
-              />
-            </el-select>
-            <el-input
-              v-model="searchText"
-              class="combo-search-input"
-              placeholder="搜索关键词（空格 = 且，竖线 | = 或）"
-              clearable
-            />
-          </div>
-          <div class="stat-chips">
-            <button
-              v-for="chip in statusChips"
-              :key="chip.status"
-              type="button"
-              class="stat-chip"
-              :class="['stat-chip--' + chip.status, { on: filterStatusList.includes(chip.status) }]"
-              @click="toggleStatusChip(chip.status)"
-            >{{ chip.label }} <b>{{ chip.count }}</b></button>
-          </div>
-          <div class="home-filter-actions">
-            <el-button class="more-filter-btn" @click="toggleAdvancedFilters">
-              更多筛选
-              <span v-if="advancedFilterCount > 0" class="filter-badge">{{ advancedFilterCount }}</span>
-            </el-button>
-            <el-button type="primary" @click="openCreateDialog(category || 'tender')">+ 新建项目</el-button>
-          </div>
+    <div class="page-container ap-page" v-loading="loading">
+      <div v-if="unassignedCount > 0" class="ap-banner">
+        <span>有 <b>{{ unassignedCount }} 个归档项目</b>未归属工程项目，不计入任何工程汇总。</span>
+        <el-button size="small" @click="showUnassigned">去归属</el-button>
+      </div>
 
-          <!-- 更多筛选面板（浮层，改动即时生效） -->
-          <div v-if="showAdvancedFilters" class="filter-panel">
-            <div class="filter-panel-hd">
-              更多筛选
-              <span class="filter-panel-hint">改动即时生效</span>
-            </div>
-            <div class="filter-panel-bd">
-              <div class="filter-grp-label">基本</div>
-              <div class="filter-grp-selects">
-                <el-select
-                  v-if="!category"
-                  v-model="filterCategoryList"
-                  multiple
-                  collapse-tags
-                  collapse-tags-tooltip
-                  placeholder="项目分类"
-                >
-                  <el-option label="招标" value="tender" />
-                  <el-option label="咨询" value="consult" />
-                  <el-option label="造价" value="cost" />
-                </el-select>
-                <el-select
-                  v-model="filterRegionList"
-                  multiple
-                  collapse-tags
-                  collapse-tags-tooltip
-                  filterable
-                  placeholder="所属地域"
-                >
-                  <el-option
-                    v-for="province in provinceOptions"
-                    :key="province"
-                    :label="province"
-                    :value="province"
-                  />
-                </el-select>
-                <el-select
-                  v-model="filterTenderTypeList"
-                  multiple
-                  collapse-tags
-                  collapse-tags-tooltip
-                  filterable
-                  placeholder="招标类型/内容"
-                >
-                  <el-option
-                    v-for="opt in tenderTypeFilterOptions"
-                    :key="opt"
-                    :label="opt"
-                    :value="opt"
-                  />
-                </el-select>
-                <el-select
-                  v-model="filterProjectTypeList"
-                  multiple
-                  collapse-tags
-                  collapse-tags-tooltip
-                  placeholder="项目类型"
-                >
-                  <el-option
-                    v-for="opt in projectTypeFilterOptions"
-                    :key="opt"
-                    :label="opt"
-                    :value="opt"
-                  />
-                </el-select>
-                <el-select
-                  v-model="filterRoadLevelList"
-                  multiple
-                  collapse-tags
-                  collapse-tags-tooltip
-                  placeholder="道路等级"
-                >
-                  <el-option
-                    v-for="opt in roadLevelFilterOptions"
-                    :key="opt"
-                    :label="opt"
-                    :value="opt"
-                  />
-                </el-select>
-                <el-select
-                  v-model="filterIndustryList"
-                  multiple
-                  collapse-tags
-                  collapse-tags-tooltip
-                  filterable
-                  placeholder="行业"
-                >
-                  <el-option
-                    v-for="opt in industryFilterOptions"
-                    :key="opt"
-                    :label="opt"
-                    :value="opt"
-                  />
-                </el-select>
-              </div>
-              <div class="filter-grp-label">范围</div>
-              <div class="filter-range-row">
-                <span class="filter-range-lb">日期</span>
-                <el-select v-model="dateField" class="filter-range-field">
-                  <el-option label="中标通知书时间" value="winNoticeDate" />
-                  <el-option label="委托时间" value="entrustDate" />
-                </el-select>
-                <el-date-picker
-                  v-model="dateFrom"
-                  type="date"
-                  value-format="YYYY-MM-DD"
-                  placeholder="开始日期"
-                  class="filter-range-input"
-                />
-                <span class="filter-range-sep">至</span>
-                <el-date-picker
-                  v-model="dateTo"
-                  type="date"
-                  value-format="YYYY-MM-DD"
-                  placeholder="结束日期"
-                  class="filter-range-input"
-                />
-              </div>
-              <div class="filter-range-row">
-                <span class="filter-range-lb">金额（万元）</span>
-                <el-select v-model="amountField" class="filter-range-field">
-                  <el-option label="项目总投资" value="totalInvestment" />
-                  <el-option label="中标金额" value="winAmount" />
-                </el-select>
-                <el-input v-model="amountMin" placeholder="最小（含）" class="filter-range-input" clearable />
-                <span class="filter-range-sep">至</span>
-                <el-input v-model="amountMax" placeholder="最大（含）" class="filter-range-input" clearable />
-              </div>
-              <div class="filter-range-row">
-                <span class="filter-range-lb">里程（公里）</span>
-                <span class="filter-range-field"></span>
-                <el-input v-model="mileageMin" placeholder="最小（含）" class="filter-range-input" clearable />
-                <span class="filter-range-sep">至</span>
-                <el-input v-model="mileageMax" placeholder="最大（含）" class="filter-range-input" clearable />
-              </div>
-            </div>
-            <div class="filter-panel-ft">
-              <el-button @click="clearPanelFilters">清空</el-button>
-              <el-button type="primary" @click="toggleAdvancedFilters">完成</el-button>
-            </div>
-          </div>
-        </div>
-
-        <!-- 已选条件（仅面板内条件；状态筛选由上方统计 chips 承担） -->
-        <div v-if="activeFilterChips.length > 0" class="filter-chips-row">
-          <span class="filter-chips-label">已选条件：</span>
-          <span v-for="chip in activeFilterChips" :key="chip.key" class="filter-chip">
-            {{ chip.label }}
-            <i class="filter-chip-x" @click="removeFilterChip(chip)">✕</i>
-          </span>
-          <el-button text type="primary" size="small" @click="clearPanelFilters">清空全部</el-button>
-        </div>
-        <div v-if="!loading && groupedProjects.length === 0" class="empty-state">
-          <p>{{ hasNarrowingFilters ? '没有符合筛选条件的项目' : '还没有项目，点击上方新建按钮开始' }}</p>
-        </div>
-        <div
-          v-for="group in groupedProjects"
-          :key="group.departmentId"
-          class="project-dept-group"
-          :class="{ 'is-collapsed': isDeptCollapsed(group.departmentId) }"
+      <div class="ap-tabs">
+        <button
+          v-for="tab in categoryTabs"
+          :key="tab.code || 'all'"
+          type="button"
+          class="ap-tab"
+          :class="{ on: categoryTab === tab.code }"
+          @click="switchCategory(tab.code)"
         >
-          <div
-            class="project-dept-heading"
-            role="button"
-            tabindex="0"
-            :aria-expanded="(!isDeptCollapsed(group.departmentId)).toString()"
-            @click="toggleDeptCollapse(group.departmentId)"
-            @keydown.enter.prevent="toggleDeptCollapse(group.departmentId)"
-            @keydown.space.prevent="toggleDeptCollapse(group.departmentId)"
-          >
-            <span class="project-dept-chevron" aria-hidden="true"></span>
-            <span class="project-dept-name">{{ group.departmentName }}</span>
-            <span class="project-dept-count">{{ group.projects.length }}</span>
+          {{ tab.label }} <span class="ap-tab-count">{{ tab.count }}</span>
+        </button>
+      </div>
+
+      <div class="ap-toolbar">
+        <div class="ap-filters">
+          <el-input
+            v-model="searchText"
+            class="ap-search"
+            placeholder="搜索归档项目名称、编号、建设单位"
+            clearable
+            @input="onSearchInput"
+            @clear="onSearchInput"
+          />
+          <el-select v-model="filterStatusList" multiple collapse-tags collapse-tags-tooltip clearable placeholder="归档状态" style="width: 150px;" @change="onFilterChange">
+            <el-option v-for="opt in statusOptions" :key="opt.value" :label="opt.label" :value="opt.value" />
+          </el-select>
+          <el-select v-model="filterYearList" multiple collapse-tags collapse-tags-tooltip clearable placeholder="年份" style="width: 130px;" @change="onFilterChange">
+            <el-option v-for="y in yearOptions" :key="y" :label="y + ' 年'" :value="y" />
+          </el-select>
+          <el-select v-model="filterOwnerList" multiple collapse-tags collapse-tags-tooltip clearable filterable placeholder="负责人" style="width: 150px;" @change="onFilterChange">
+            <el-option v-for="o in ownerOptions" :key="o" :label="o" :value="o" />
+          </el-select>
+          <el-select v-model="filterMasterProjectId" clearable filterable placeholder="所属工程项目" style="width: 220px;" @change="onFilterChange">
+            <el-option label="未归属" value="unassigned" />
+            <el-option v-for="m in masterProjectOptions" :key="m.id" :label="m.name" :value="m.id" />
+          </el-select>
+        </div>
+        <div class="ap-actions">
+          <el-button @click="showAdvancedFilters = !showAdvancedFilters">
+            更多筛选
+            <span v-if="advancedFilterCount > 0" class="ap-filter-badge">{{ advancedFilterCount }}</span>
+          </el-button>
+          <el-button type="primary" @click="openCreateDialog(categoryTab)">+ 新建归档</el-button>
+        </div>
+      </div>
+
+      <div v-if="showAdvancedFilters" class="ap-advanced">
+        <div class="ap-advanced-hd">
+          更多筛选
+          <span>改动即时生效</span>
+          <el-button text size="small" style="margin-left:auto;" @click="resetFilters">清空全部</el-button>
+        </div>
+        <div class="ap-advanced-bd">
+          <el-select v-model="filterRegionList" multiple collapse-tags collapse-tags-tooltip filterable placeholder="所属地域" style="width: 180px;" @change="onFilterChange">
+            <el-option v-for="p in provinceOptions" :key="p" :label="p" :value="p" />
+          </el-select>
+          <el-select v-model="filterTenderTypeList" multiple collapse-tags collapse-tags-tooltip filterable placeholder="招标类型/内容" style="width: 180px;" @change="onFilterChange">
+            <el-option v-for="opt in tenderTypeFilterOptions" :key="opt" :label="opt" :value="opt" />
+          </el-select>
+          <el-select v-model="filterProjectTypeList" multiple collapse-tags collapse-tags-tooltip placeholder="项目类型" style="width: 160px;" @change="onFilterChange">
+            <el-option v-for="opt in projectTypeFilterOptions" :key="opt" :label="opt" :value="opt" />
+          </el-select>
+          <el-select v-model="filterRoadLevelList" multiple collapse-tags collapse-tags-tooltip placeholder="道路等级" style="width: 160px;" @change="onFilterChange">
+            <el-option v-for="opt in roadLevelFilterOptions" :key="opt" :label="opt" :value="opt" />
+          </el-select>
+          <el-select v-model="filterIndustryList" multiple collapse-tags collapse-tags-tooltip filterable placeholder="行业" style="width: 150px;" @change="onFilterChange">
+            <el-option v-for="opt in industryFilterOptions" :key="opt" :label="opt" :value="opt" />
+          </el-select>
+          <div class="ap-range">
+            <el-select v-model="dateField" style="width: 140px;" @change="onFilterChange">
+              <el-option label="中标通知书时间" value="winNoticeDate" />
+              <el-option label="委托时间" value="entrustDate" />
+            </el-select>
+            <el-date-picker v-model="dateFrom" type="date" value-format="YYYY-MM-DD" placeholder="开始日期" style="width: 140px;" @change="onFilterChange" />
+            <span>至</span>
+            <el-date-picker v-model="dateTo" type="date" value-format="YYYY-MM-DD" placeholder="结束日期" style="width: 140px;" @change="onFilterChange" />
           </div>
-          <div v-show="!isDeptCollapsed(group.departmentId)">
-            <div v-if="group.projects.length === 0" class="project-dept-empty">
-              暂无项目
-            </div>
-            <div
-              v-for="cat in group.categories"
-              :key="cat.categoryId"
-              class="project-cat-group"
-              :class="{ 'is-collapsed': isCatCollapsed(group.departmentId, cat.categoryId) }"
-            >
-              <div
-                class="project-cat-heading"
-                role="button"
-                tabindex="0"
-                :aria-expanded="(!isCatCollapsed(group.departmentId, cat.categoryId)).toString()"
-                @click="toggleCatCollapse(group.departmentId, cat.categoryId)"
-                @keydown.enter.prevent="toggleCatCollapse(group.departmentId, cat.categoryId)"
-                @keydown.space.prevent="toggleCatCollapse(group.departmentId, cat.categoryId)"
-              >
-                <span class="project-cat-chevron" aria-hidden="true"></span>
-                <span
-                  class="project-cat-label"
-                  :class="'cat-tag-' + (cat.categoryCode || 'tender')"
-                >{{ cat.categoryName }}</span>
-                <span class="project-cat-count">{{ cat.projects.length }}</span>
-              </div>
-              <div v-show="!isCatCollapsed(group.departmentId, cat.categoryId)" class="project-grid">
-                <div
-                  v-for="project in cat.projects"
-                  :key="project.projectId"
-                  class="project-card"
-                  :class="'card-' + project.status"
-                >
-                  <div class="card-header">
-                    <a
-                      class="card-title"
-                      :href="'#/project/' + project.projectId"
-                      :title="project.projectName"
-                      @click.prevent="navigateTo('#/project/' + project.projectId)"
-                    >{{ project.projectName }}</a>
-                    <a
-                      v-if="canReassignOwnership(project)"
-                      href="javascript:;"
-                      class="card-dept-link"
-                      :title="'调整所属部门：' + (project.departmentName || '未分配部门')"
-                      @click.stop.prevent="openOwnershipDialog(project)"
-                    >{{ project.departmentName || '未分配部门' }}</a>
-                    <span v-else class="card-dept-text">{{ project.departmentName || '未分配部门' }}</span>
-                  </div>
-                  <div class="card-body">
-                    <span v-if="project.status === 'draft'" class="card-progress">
-                      草稿
-                    </span>
-                    <span v-else-if="project.status === 'pending_review'" class="card-status card-pending-review">
-                      待审核
-                    </span>
-                    <span v-else-if="project.status === 'review_rejected'" class="card-status card-review-rejected">
-                      审核不通过
-                    </span>
-                    <span v-else-if="project.status === 'pending_paper'" class="card-status card-pending-paper">
-                      待纸质核对
-                    </span>
-                    <span v-else-if="project.status === 'archived'" class="card-status">
-                      已归档
-                    </span>
-                    <span v-else class="card-status card-ready-text">
-                      {{ project.status === 'review_approved' ? '审核通过' : '可提交' }}
-                    </span>
-                    <span v-if="project.paperTotal > 0" class="card-paper-stats">[含纸质 {{ project.paperConfirmed }}/{{ project.paperTotal }}]</span>
-                    <span
-                      class="card-cat-tag"
-                      :class="'cat-tag-' + (project.categoryCode || 'tender')"
-                    >{{ project.categoryName || '招标' }}</span>
-                  </div>
-                  <div class="card-footer">
-                    <span class="card-time">{{ getProjectUpdateLine(project) }}</span>
-                    <el-button
-                      v-if="canDeleteProject(project)"
-                      text
-                      size="small"
-                      @click.stop="deleteProject(project.projectId)"
-                      class="card-delete"
-                    >删除</el-button>
-                  </div>
-                </div>
-              </div>
-            </div>
+          <div class="ap-range">
+            <el-select v-model="amountField" style="width: 130px;" @change="onFilterChange">
+              <el-option label="项目总投资" value="totalInvestment" />
+              <el-option label="中标金额" value="winAmount" />
+            </el-select>
+            <el-input v-model="amountMin" placeholder="金额最小（万元）" style="width: 150px;" clearable @change="onFilterChange" />
+            <span>至</span>
+            <el-input v-model="amountMax" placeholder="金额最大（万元）" style="width: 150px;" clearable @change="onFilterChange" />
+          </div>
+          <div class="ap-range">
+            <span class="ap-range-label">里程（公里）</span>
+            <el-input v-model="mileageMin" placeholder="最小" style="width: 110px;" clearable @change="onFilterChange" />
+            <span>至</span>
+            <el-input v-model="mileageMax" placeholder="最大" style="width: 110px;" clearable @change="onFilterChange" />
           </div>
         </div>
-        <div v-if="showProjectPagination" class="project-list-pagination">
+      </div>
+
+      <div class="ap-table-card">
+        <el-table :data="projects" style="width: 100%;" row-key="projectId">
+          <el-table-column label="归档项目" min-width="230">
+            <template #default="{ row }">
+              <div class="ap-name" @click="goDetail(row)">{{ row.projectName }}</div>
+              <div v-if="projectSub(row)" class="ap-sub">{{ projectSub(row) }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column label="编号" width="132">
+            <template #default="{ row }"><span class="ap-mono">{{ row.projectNo || '—' }}</span></template>
+          </el-table-column>
+          <el-table-column label="类型" width="105">
+            <template #default="{ row }"><span class="ap-chip ap-chip--cat">{{ row.categoryName || '—' }}</span></template>
+          </el-table-column>
+          <el-table-column label="所属工程项目" min-width="210">
+            <template #default="{ row }">
+              <span v-if="row.masterProjectName" class="ap-master-name">{{ row.masterProjectName }}</span>
+              <span v-else class="ap-unassigned">未归属</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="归档状态" width="112">
+            <template #default="{ row }"><span :class="statusClass(row.status)">{{ statusLabel(row.status) }}</span></template>
+          </el-table-column>
+          <el-table-column label="负责人" width="96">
+            <template #default="{ row }">{{ row.createdByName || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="更新" width="82">
+            <template #default="{ row }"><span class="ap-time">{{ shortDate(row.updatedAt) }}</span></template>
+          </el-table-column>
+          <el-table-column label="操作" width="200" fixed="right">
+            <template #default="{ row }">
+              <el-button text type="primary" @click="goDetail(row)">进入归档</el-button>
+              <el-button v-if="!row.masterProjectId && canChangeMaster(row)" text @click="openAssignDialog(row)">归入工程</el-button>
+              <el-button v-if="canDeleteProject(row)" text type="danger" @click="deleteProject(row)">删除</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <div v-if="!loading && projects.length === 0" class="ap-empty">
+          {{ hasNarrowingFilters ? '没有符合筛选条件的归档项目' : '还没有归档项目，点击右上角新建开始' }}
+        </div>
+
+        <div v-if="projectTotal > projectPageSize" class="ap-pager">
           <el-pagination
             v-model:current-page="projectPage"
             :page-size="projectPageSize"
@@ -2249,112 +1782,24 @@ app.component('home-page', {
         </div>
       </div>
 
-      <!-- 新建项目弹窗 -->
-      <el-dialog v-model="showCreateDialog" :title="createDialogTitle" width="480px">
-        <el-form label-width="88px">
-          <el-form-item label="项目分类" required>
-            <el-radio-group v-model="createCategoryCode">
-              <el-radio-button label="tender">招标</el-radio-button>
-              <el-radio-button label="consult">咨询</el-radio-button>
-              <el-radio-button label="cost">造价</el-radio-button>
-            </el-radio-group>
-          </el-form-item>
-          <el-form-item label="项目名称" required>
-            <el-input
-              v-model="newProjectName"
-              placeholder="输入项目名称"
-              @keyup.enter="createProject"
-            />
-          </el-form-item>
-          <el-form-item label="所属地域" required>
-            <el-select
-              v-model="newProjectRegion"
-              placeholder="请选择省份"
-              filterable
-              style="width: 100%;"
-            >
-              <el-option v-for="p in provinceOptions" :key="p" :label="p" :value="p" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="采购类型" required>
-            <el-select v-model="newProjectProcurementType" style="width: 100%;">
-              <el-option label="工程(G)" value="G" />
-              <el-option label="货物(H)" value="H" />
-              <el-option label="服务(F)" value="F" />
-            </el-select>
-          </el-form-item>
-        </el-form>
-        <template #footer>
-          <el-button @click="showCreateDialog = false">取消</el-button>
-          <el-button type="primary" :loading="creatingProject" @click="createProject">创建</el-button>
-        </template>
-      </el-dialog>
+      <archive-project-create-dialog
+        v-model:visible="showCreateDialog"
+        :default-category="createCategoryCode"
+        @created="onProjectCreated"
+      />
 
-      <!-- 调整项目归属弹窗（仅管理员） -->
-      <el-dialog
-        v-model="showOwnershipDialog"
-        title="调整项目归属"
-        width="440px"
-        destroy-on-close
-      >
-        <p v-if="ownershipProject" class="ownership-project-name" :title="ownershipProject.projectName">
-          {{ ownershipProject.projectName }}
-        </p>
-        <el-form label-width="88px">
-          <el-form-item label="新部门" required>
-            <el-select
-              v-model="ownershipForm.departmentId"
-              placeholder="选择部门"
-              style="width: 100%;"
-              filterable
-              @change="onOwnershipDepartmentChange"
-            >
-              <el-option
-                v-for="dept in departments"
-                :key="dept.id"
-                :label="dept.name"
-                :value="dept.id"
-              />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="归属人" required>
-            <el-select
-              v-model="ownershipForm.ownerUserId"
-              placeholder="选择部门内人员"
-              style="width: 100%;"
-              filterable
-              :loading="ownershipLoadingUsers"
-              :disabled="!ownershipForm.departmentId"
-            >
-              <el-option
-                v-for="user in ownershipUsers"
-                :key="user.id"
-                :label="user.name + (user.username ? '（' + user.username + '）' : '')"
-                :value="user.id"
-              />
-            </el-select>
-            <div v-if="ownershipForm.departmentId && !ownershipLoadingUsers && ownershipUsers.length === 0" class="ownership-empty-hint">
-              该部门暂无可用人员
-            </div>
-          </el-form-item>
-        </el-form>
+      <el-dialog v-model="showAssignDialog" title="归入工程项目" width="520px" destroy-on-close>
+        <div v-if="assignTarget" class="ap-assign-target">{{ assignTarget.projectName }}</div>
+        <master-project-picker v-model="assignMasterProject" />
         <template #footer>
-          <el-button @click="showOwnershipDialog = false">取消</el-button>
-          <el-button type="primary" :loading="ownershipSaving" @click="submitOwnership">确定</el-button>
+          <el-button @click="showAssignDialog = false">取消</el-button>
+          <el-button type="primary" :loading="assigning" @click="submitAssign">确定</el-button>
         </template>
       </el-dialog>
     </div>
   `
 });
 
-// ============================================
-// 项目详情页组件
-// ============================================
-
-/**
- * 项目详情页组件
- * 展示项目文件上传、提取状态及提取结果预览
- */
 app.component('project-page', {
   props: {
     projectId: { type: String, required: true },
@@ -2384,14 +1829,9 @@ app.component('project-page', {
       region: '',             // 所属地域（省份）
       selectedDocTypes: {},   // { docType: boolean } 一键提取勾选状态
       batchExtracting: false,  // 一键提取进行中
-      projectContracts: [],    // 项目已关联合同
-      contractsCanEdit: false,
-      contractSearchText: '',
-      contractSearchResults: [],
-      contractSearchLoading: false,
-      selectedSearchContract: null,
-      contractSearchDebounceTimer: null,
-      contractsExpanded: false,
+      showMasterDialog: false,
+      masterSelection: null,
+      masterSaving: false,
       // ---- 导入方式选择 / 从文件夹导入 ----
       importMethodVisible: false, // 导入方式选择弹窗
       folderImportVisible: false,
@@ -2567,6 +2007,24 @@ app.component('project-page', {
     isPendingPaper() {
       return !!(this.project && this.project.status === 'pending_paper');
     },
+    projectStatusLabel() {
+      const map = {
+        draft: '草稿',
+        pending_review: '待审核',
+        review_rejected: '审核不通过',
+        review_approved: '审核通过',
+        pending_paper: '待纸质核对',
+        archived: '已归档'
+      };
+      return this.project ? (map[this.project.status] || this.project.status || '—') : '—';
+    },
+    headUpdatedAt() {
+      const value = this.project && this.project.updatedAt;
+      if (!value) return '—';
+      const date = new Date(value);
+      if (isNaN(date.getTime())) return '—';
+      return String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
+    },
     /**
      * 当前项目是否锁定不可编辑（待审核 / 待纸质核对 / 已归档）
      */
@@ -2625,15 +2083,6 @@ app.component('project-page', {
         ...f,
         categoryLabel: Utils.formatFileDocCategory(f.docType, f.segmentNo, this.segments)
       }));
-    },
-    displayedProjectContracts() {
-      const list = this.projectContracts || [];
-      if (this.contractsExpanded || list.length <= 3) return list;
-      return list.slice(0, 3);
-    },
-    hiddenContractCount() {
-      const total = (this.projectContracts || []).length;
-      return total > 3 ? total - 3 : 0;
     },
     /**
      * 是否招标类项目（「从文件夹导入」仅对招标类开放）
@@ -2782,15 +2231,6 @@ app.component('project-page', {
   async mounted() {
     await this.loadProject();
   },
-  watch: {
-    contractSearchText() {
-      if (this.contractSearchDebounceTimer) clearTimeout(this.contractSearchDebounceTimer);
-      if (!this.contractsCanEdit) return;
-      this.contractSearchDebounceTimer = setTimeout(() => {
-        this.searchContractsForProject();
-      }, 300);
-    }
-  },
   beforeUnmount() {
     this.stopPolling();
     if (this.segmentSaveTimer) {
@@ -2898,7 +2338,6 @@ app.component('project-page', {
         await Promise.all([
           this.loadFiles(),
           this.loadSegments(),
-          this.loadProjectContracts(),
           this.loadArchiveTemplates()
         ]);
         // 从项目信息中加载采购类型与所属地域
@@ -2953,59 +2392,52 @@ app.component('project-page', {
       });
     },
     /**
-     * 加载项目已关联合同
+     * 跳转到所属工程项目详情
      */
-    async loadProjectContracts() {
-      try {
-        const res = await API.getProjectContracts(this.projectId);
-        this.projectContracts = res.items || [];
-        this.contractsCanEdit = !!res.canEdit;
-        this.contractsExpanded = false;
-      } catch (error) {
-        this.projectContracts = [];
-        this.contractsCanEdit = false;
+    goMasterProject() {
+      if (this.project && this.project.masterProjectId) {
+        this.navigateTo('#/master-projects/' + this.project.masterProjectId);
       }
     },
-    async searchContractsForProject() {
-      const q = (this.contractSearchText || '').trim();
-      this.contractSearchLoading = true;
-      try {
-        const linkedIds = new Set((this.projectContracts || []).map((c) => c.contractId));
-        const res = await API.searchContracts(q, 20);
-        this.contractSearchResults = (res.items || []).filter((c) => !linkedIds.has(c.id));
-      } catch (error) {
-        this.contractSearchResults = [];
-      }
-      this.contractSearchLoading = false;
+    /**
+     * 是否可修改工程归属（创建人或管理员）
+     */
+    canChangeMasterAssignment() {
+      if (!this.project || !this.currentUser) return false;
+      const isAdmin = this.currentUser.role === 'admin' || this.currentUser.roleCode === 'admin';
+      return isAdmin || this.project.createdBy === this.currentUser.id;
     },
-    selectSearchContract(contract) {
-      this.selectedSearchContract = contract;
-    },
-    async addProjectContractLink() {
-      if (!this.selectedSearchContract) {
-        ElMessage.warning('请先从搜索结果中选择合同');
+    openMasterDialog() {
+      if (!this.canChangeMasterAssignment()) {
+        ElMessage.warning('仅创建人或管理员可修改工程归属');
         return;
       }
-      try {
-        const link = await API.addProjectContract(this.projectId, this.selectedSearchContract.id);
-        this.projectContracts.push(link);
-        this.selectedSearchContract = null;
-        this.contractSearchText = '';
-        this.contractSearchResults = [];
-        ElMessage.success('已关联合同');
-      } catch (error) {
-        ElMessage.error(error.message || '关联失败');
-      }
+      this.masterSelection = this.project && this.project.masterProjectId
+        ? {
+            id: this.project.masterProjectId,
+            name: this.project.masterProjectName,
+            ownerName: this.project.masterProjectOwnerName || this.project.ownerNameSnapshot || '',
+            projectNo: this.project.masterProjectNo || ''
+          }
+        : null;
+      this.showMasterDialog = true;
     },
-    async removeProjectContractLink(link) {
-      if (!link || !link.canDelete) return;
+    async submitMasterAssignment() {
+      if (!this.project) return;
+      this.masterSaving = true;
       try {
-        await API.removeProjectContract(this.projectId, link.linkId);
-        this.projectContracts = this.projectContracts.filter((c) => c.linkId !== link.linkId);
-        ElMessage.success('已解除关联');
+        const updated = await DB.changeProjectMasterProject(
+          this.project.projectId,
+          this.masterSelection ? this.masterSelection.id : null,
+          this.masterSelection ? (this.masterSelection.ownerName || '') : ''
+        );
+        this.project = { ...this.project, ...updated };
+        this.showMasterDialog = false;
+        ElMessage.success('工程归属已更新');
       } catch (error) {
-        ElMessage.error(error.message || '解除关联失败');
+        ElMessage.error(error.message || '更新归属失败');
       }
+      this.masterSaving = false;
     },
     /**
      * 开始编辑项目名称
@@ -4137,6 +3569,20 @@ app.component('project-page', {
   },
   template: `
     <div class="page-container" v-loading="loading">
+      <div class="page-crumb">
+        <a href="javascript:;" @click="navigateTo('#/projects')">归档项目</a>
+        <span>/</span>
+        <template v-if="project && project.masterProjectName">
+          <a href="javascript:;" @click="goMasterProject">{{ project.masterProjectName }}</a>
+          <span>/</span>
+          <b>{{ project.projectName }}</b>
+        </template>
+        <template v-else>
+          <span class="ap-unassigned">未归属</span>
+          <span>/</span>
+          <b>{{ project ? project.projectName : '' }}</b>
+        </template>
+      </div>
       <!-- 页头：返回 + 可编辑标题 + 状态 -->
       <div class="page-head">
         <el-button text @click="navigateTo('#/projects')">← 返回列表</el-button>
@@ -4151,6 +3597,13 @@ app.component('project-page', {
         <el-tag v-if="isPendingReview" type="warning" size="small">待审核</el-tag>
         <el-tag v-else-if="isPendingPaper" type="warning" size="small">待纸质核对</el-tag>
         <el-tag v-else-if="isArchived" type="info" size="small">只读</el-tag>
+      </div>
+
+      <div v-if="project" class="project-head-meta">
+        <span>服务类型<b>{{ project.categoryName || '—' }}</b></span>
+        <span>归档状态<b>{{ projectStatusLabel }}</b></span>
+        <span>负责人<b>{{ project.createdByName || '—' }}</b></span>
+        <span>更新于<b>{{ headUpdatedAt }}</b></span>
       </div>
 
       <div
@@ -4263,69 +3716,17 @@ app.component('project-page', {
               >保存标段配置</el-button>
             </div>
 
-            <div class="contract-links-section">
-              <div class="contract-links-header">
-                <span style="font-size: 13px; color: #606266; white-space: nowrap;">所属合同：</span>
-                <el-tag v-if="!contractsCanEdit" size="small" type="info">只读</el-tag>
-              </div>
-
-              <template v-if="contractsCanEdit">
-                <div class="contract-links-search">
-                  <el-input
-                    v-model="contractSearchText"
-                    size="small"
-                    placeholder="搜索合同名称..."
-                    clearable
-                    style="flex: 1;"
-                  />
-                  <el-button size="small" type="primary" plain @click="addProjectContractLink">添加</el-button>
-                </div>
-                <div v-loading="contractSearchLoading" class="contract-search-results contract-search-results--compact">
-                  <div
-                    v-for="item in contractSearchResults"
-                    :key="item.id"
-                    class="contract-search-result-item"
-                    :class="{ 'is-selected': selectedSearchContract && selectedSearchContract.id === item.id }"
-                    @click="selectSearchContract(item)"
-                  >
-                    <span>{{ item.name }}</span>
-                    <el-tag v-if="item.isAnchor" size="small" type="warning" style="margin-left: 8px;">大合同</el-tag>
-                    <el-tag v-if="item.seqNo" size="small" type="info" style="margin-left: 6px;">{{ item.seqNo }}</el-tag>
-                  </div>
-                </div>
+            <div class="project-master-inline">
+              <span class="project-master-label">所属工程项目：</span>
+              <template v-if="project && project.masterProjectName">
+                <span class="project-master-name">{{ project.masterProjectName }}</span>
+                <el-button v-if="canChangeMasterAssignment()" text size="small" @click="openMasterDialog">更换</el-button>
               </template>
-
-              <div v-if="projectContracts.length > 0" class="contract-linked-list">
-                <div
-                  v-for="link in displayedProjectContracts"
-                  :key="link.linkId"
-                  class="contract-linked-item"
-                >
-                  <span class="contract-linked-name">《{{ link.contractName }} &lt;{{ link.createdByName || '未知' }}&gt;》</span>
-                  <el-button
-                    v-if="contractsCanEdit && link.canDelete"
-                    size="small"
-                    text
-                    type="danger"
-                    @click="removeProjectContractLink(link)"
-                  >删除</el-button>
-                </div>
-                <el-button
-                  v-if="hiddenContractCount > 0 && !contractsExpanded"
-                  size="small"
-                  text
-                  type="primary"
-                  @click="contractsExpanded = true"
-                >展开全部 ({{ projectContracts.length }})</el-button>
-                <el-button
-                  v-if="contractsExpanded && projectContracts.length > 3"
-                  size="small"
-                  text
-                  type="primary"
-                  @click="contractsExpanded = false"
-                >收起</el-button>
-              </div>
-              <div v-else class="contract-linked-empty">暂未关联合同</div>
+              <template v-else>
+                <span class="ap-unassigned">未归属</span>
+                <el-button v-if="canChangeMasterAssignment()" text size="small" @click="openMasterDialog">归入工程</el-button>
+              </template>
+              <span v-if="project && !project.region" class="project-region-warning">未设置地域，归档前需在下方补充</span>
             </div>
           </div>
 
@@ -4832,6 +4233,14 @@ app.component('project-page', {
 
         <template #footer>
           <el-button type="primary" @click="closeFolderResult">关闭</el-button>
+        </template>
+      </el-dialog>
+
+      <el-dialog v-model="showMasterDialog" title="所属工程项目" width="520px" destroy-on-close>
+        <master-project-picker v-model="masterSelection" />
+        <template #footer>
+          <el-button @click="showMasterDialog = false">取消</el-button>
+          <el-button type="primary" :loading="masterSaving" @click="submitMasterAssignment">保存</el-button>
         </template>
       </el-dialog>
     </div>
@@ -6146,348 +5555,527 @@ app.component('review-page', {
 // 管理员合同管理页面组件
 // ============================================
 
-app.component('admin-contract-page', {
+// ============================================
+// 工程项目表单弹窗（新建 / 编辑）
+// ============================================
+
+app.component('master-project-form-dialog', {
+  props: {
+    visible: { type: Boolean, default: false },
+    project: { type: Object, default: null }
+  },
+  emits: ['update:visible', 'saved'],
+  data() {
+    return {
+      form: {
+        name: '',
+        projectNo: '',
+        ownerName: '',
+        region: '',
+        industry: '公路',
+        totalInvestment: '',
+        constructionScale: '',
+        manager: '',
+        status: 'active',
+        remark: ''
+      },
+      saving: false
+    };
+  },
+  computed: {
+    isEdit() {
+      return !!(this.project && this.project.id);
+    }
+  },
+  watch: {
+    visible(val) {
+      if (val) this.resetForm();
+    }
+  },
+  methods: {
+    resetForm() {
+      const p = this.project || {};
+      this.form = {
+        name: p.name || '',
+        projectNo: p.projectNo || '',
+        ownerName: p.ownerName || '',
+        region: p.region || '',
+        industry: p.industry || '公路',
+        totalInvestment: p.totalInvestment == null ? '' : p.totalInvestment,
+        constructionScale: p.constructionScale || '',
+        manager: p.manager || '',
+        status: p.status || 'active',
+        remark: p.remark || ''
+      };
+      this.saving = false;
+    },
+    close() {
+      if (this.saving) return;
+      this.$emit('update:visible', false);
+    },
+    async submit() {
+      const name = String(this.form.name || '').trim();
+      if (!name) {
+        ElMessage.warning('请输入工程项目名称');
+        return;
+      }
+      this.saving = true;
+      try {
+        const payload = {
+          name,
+          projectNo: String(this.form.projectNo || '').trim(),
+          ownerName: String(this.form.ownerName || '').trim(),
+          region: String(this.form.region || '').trim(),
+          industry: String(this.form.industry || '').trim(),
+          totalInvestment: this.form.totalInvestment === '' ? null : Number(this.form.totalInvestment),
+          constructionScale: String(this.form.constructionScale || '').trim(),
+          manager: String(this.form.manager || '').trim(),
+          status: this.form.status || 'active',
+          remark: String(this.form.remark || '').trim()
+        };
+        const saved = this.isEdit
+          ? await API.updateMasterProject(this.project.id, payload)
+          : await API.createMasterProject(payload);
+        ElMessage.success(this.isEdit ? '工程项目已更新' : '工程项目已创建');
+        this.$emit('saved', saved);
+        this.$emit('update:visible', false);
+      } catch (error) {
+        ElMessage.error(error.message || '保存失败');
+      }
+      this.saving = false;
+    }
+  },
+  template: `
+    <el-dialog
+      :model-value="visible"
+      :title="isEdit ? '编辑工程项目' : '新建工程项目'"
+      width="640px"
+      :close-on-click-modal="false"
+      @update:model-value="$emit('update:visible', $event)"
+    >
+      <div class="mpf-hint">工程项目是业主的立项工程，仅用于把归档项目分组，不代表本公司承接的业务。</div>
+      <el-form label-width="96px">
+        <el-form-item label="工程项目名称" required>
+          <el-input v-model="form.name" maxlength="200" show-word-limit placeholder="如 G8517 屏山至兴义国家高速公路" />
+        </el-form-item>
+        <div class="mpf-grid">
+          <el-form-item label="工程项目编号">
+            <el-input v-model="form.projectNo" placeholder="留空自动生成 P2026-001" />
+          </el-form-item>
+          <el-form-item label="建设单位">
+            <el-input v-model="form.ownerName" placeholder="业主单位" />
+          </el-form-item>
+          <el-form-item label="地区">
+            <el-input v-model="form.region" placeholder="如 贵州" />
+          </el-form-item>
+          <el-form-item label="行业">
+            <el-input v-model="form.industry" placeholder="默认 公路" />
+          </el-form-item>
+          <el-form-item label="总投资（万元）">
+            <el-input v-model="form.totalInvestment" type="number" placeholder="可空" />
+          </el-form-item>
+          <el-form-item label="建设规模">
+            <el-input v-model="form.constructionScale" placeholder="如 160km" />
+          </el-form-item>
+          <el-form-item label="负责人">
+            <el-input v-model="form.manager" placeholder="可空" />
+          </el-form-item>
+          <el-form-item label="状态">
+            <el-select v-model="form.status" style="width: 100%;">
+              <el-option label="进行中" value="active" />
+              <el-option label="已完工" value="closed" />
+              <el-option label="已暂停" value="paused" />
+            </el-select>
+          </el-form-item>
+        </div>
+        <el-form-item label="备注">
+          <el-input v-model="form.remark" type="textarea" :rows="2" placeholder="可空" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="close">取消</el-button>
+        <el-button type="primary" :loading="saving" @click="submit">保存</el-button>
+      </template>
+    </el-dialog>
+  `
+});
+
+// ============================================
+// 工程项目列表页
+// ============================================
+
+app.component('master-project-list-page', {
   emits: ['open-settings'],
   props: {
     currentUser: { type: Object, default: null }
   },
   data() {
     return {
-      contracts: [],
+      loading: true,
+      items: [],
       total: 0,
-      currentPage: 1,
-      pageSize: 50,
-      loading: false,
-      searchText: '',
-      searchType: 'contract',
-      searchDebounceTimer: null,
-      createDialogVisible: false,
-      createForm: { name: '' },
-      createSaving: false,
-      editDialogVisible: false,
-      editSaving: false,
-      editingContract: null,
-      editForm: { name: '', projects: [] },
-      projectSearchText: '',
-      projectSearchResults: [],
-      projectSearchLoading: false,
-      selectedSearchProject: null,
-      projectSearchDebounceTimer: null
+      page: 1,
+      pageSize: 20,
+      search: '',
+      ownerName: '',
+      year: '',
+      status: '',
+      showForm: false,
+      editingProject: null,
+      searchTimer: null
     };
   },
   computed: {
     isAdmin() {
       const u = this.currentUser;
       return !!(u && (u.role === 'admin' || u.roleCode === 'admin'));
-    }
-  },
-  watch: {
-    searchText() {
-      if (this.searchDebounceTimer) clearTimeout(this.searchDebounceTimer);
-      this.searchDebounceTimer = setTimeout(() => {
-        this.currentPage = 1;
-        this.loadContracts();
-      }, 300);
     },
-    searchType() {
-      this.currentPage = 1;
-      this.loadContracts();
-    },
-    projectSearchText(val) {
-      if (this.projectSearchDebounceTimer) clearTimeout(this.projectSearchDebounceTimer);
-      this.projectSearchDebounceTimer = setTimeout(() => {
-        this.searchProjectsForEdit(val);
-      }, 300);
+    yearOptions() {
+      const current = new Date().getFullYear();
+      const years = [];
+      for (let i = 0; i < 8; i++) years.push(String(current - i));
+      return years;
     }
   },
   async mounted() {
-    if (!this.isAdmin) {
-      window.navigateTo('#/home');
-      return;
-    }
-    await this.loadContracts();
+    await this.load();
   },
   methods: {
     navigateTo(path) {
       window.navigateTo(path);
     },
-    goHome() {
-      this.navigateTo('#/home');
-    },
-    rowIndex(index) {
-      return (this.currentPage - 1) * this.pageSize + index + 1;
-    },
-    formatProjectNames(row) {
-      const names = row.projectNames || [];
-      if (names.length === 0) return '—';
-      if (names.length <= 3) return names.join('、');
-      return names.slice(0, 3).join('、') + ' 等 ' + row.projectCount + ' 个';
-    },
-    async loadContracts() {
+    async load() {
       this.loading = true;
       try {
-        const res = await API.listContracts({
-          page: this.currentPage,
+        const res = await API.listMasterProjects({
+          page: this.page,
           pageSize: this.pageSize,
-          search: this.searchText,
-          searchType: this.searchType
+          search: this.search,
+          ownerName: this.ownerName,
+          year: this.year,
+          status: this.status
         });
-        this.contracts = res.items || [];
+        this.items = res.items || [];
         this.total = res.total || 0;
       } catch (error) {
-        ElMessage.error('加载合同列表失败: ' + error.message);
+        ElMessage.error('加载工程项目失败: ' + error.message);
       }
       this.loading = false;
     },
-    handlePageChange(page) {
-      this.currentPage = page;
-      this.loadContracts();
+    onSearchInput() {
+      if (this.searchTimer) clearTimeout(this.searchTimer);
+      this.searchTimer = setTimeout(() => {
+        this.page = 1;
+        this.load();
+      }, 300);
     },
-    openCreateDialog() {
-      this.createForm = { name: '' };
-      this.createDialogVisible = true;
+    onFilterChange() {
+      this.page = 1;
+      this.load();
     },
-    async saveCreate() {
-      const name = (this.createForm.name || '').trim();
-      if (!name) {
-        ElMessage.warning('请输入合同名称');
+    onPageChange(page) {
+      this.page = page;
+      this.load();
+    },
+    openCreate() {
+      this.editingProject = null;
+      this.showForm = true;
+    },
+    openEdit(item) {
+      const u = this.currentUser;
+      const isAdmin = !!(u && (u.role === 'admin' || u.roleCode === 'admin'));
+      if (!isAdmin && item.createdBy !== (u && u.id)) {
+        ElMessage.warning('仅创建人或管理员可编辑该工程项目');
         return;
       }
-      this.createSaving = true;
-      try {
-        await API.createContract(name);
-        ElMessage.success('合同创建成功');
-        this.createDialogVisible = false;
-        await this.loadContracts();
-      } catch (error) {
-        ElMessage.error(error.message || '创建失败');
-      }
-      this.createSaving = false;
+      this.editingProject = item;
+      this.showForm = true;
     },
-    async openEditDialog(row) {
-      try {
-        const detail = await API.getContract(row.id);
-        this.editingContract = detail;
-        this.editForm = {
-          name: detail.name,
-          projects: (detail.projects || []).map((p) => ({ ...p }))
-        };
-        this.projectSearchText = '';
-        this.projectSearchResults = [];
-        this.selectedSearchProject = null;
-        this.editDialogVisible = true;
-        this.searchProjectsForEdit('');
-      } catch (error) {
-        ElMessage.error('加载合同详情失败: ' + error.message);
-      }
+    async onSaved() {
+      await this.load();
     },
-    async searchProjectsForEdit(q) {
-      if (!this.editingContract) return;
-      this.projectSearchLoading = true;
-      try {
-        const linkedIds = new Set(this.editForm.projects.map((p) => p.projectId));
-        const res = await API.searchContractsForAdmin({
-          q: q || '',
-          page: 1,
-          pageSize: 20,
-          excludeContractId: this.editingContract.id
-        });
-        this.projectSearchResults = (res.items || []).filter((p) => !linkedIds.has(p.id));
-      } catch (error) {
-        ElMessage.error('搜索项目失败: ' + error.message);
-        this.projectSearchResults = [];
-      }
-      this.projectSearchLoading = false;
+    goDetail(item) {
+      this.navigateTo('#/master-projects/' + item.id);
     },
-    selectSearchProject(project) {
-      this.selectedSearchProject = project;
-    },
-    addProjectToEditForm() {
-      if (!this.selectedSearchProject) {
-        ElMessage.warning('请先从搜索结果中选择项目');
-        return;
-      }
-      const p = this.selectedSearchProject;
-      const exists = this.editForm.projects.some((item) => item.projectId === p.id);
-      if (exists) {
-        ElMessage.warning('该项目已在列表中');
-        return;
-      }
-      this.editForm.projects.push({
-        linkId: '',
-        projectId: p.id,
-        projectName: p.name,
-        createdBy: this.currentUser ? this.currentUser.id : '',
-        createdByName: this.currentUser ? (this.currentUser.name || '') : '',
-        createdAt: '',
-        isNew: true
-      });
-      this.selectedSearchProject = null;
-      this.projectSearchResults = this.projectSearchResults.filter((item) => item.id !== p.id);
-    },
-    removeProjectFromEditForm(index) {
-      this.editForm.projects.splice(index, 1);
-    },
-    async saveEdit() {
-      const name = (this.editForm.name || '').trim();
-      if (!name) {
-        ElMessage.warning('合同名称不能为空');
-        return;
-      }
-      if (!this.editingContract) return;
-      this.editSaving = true;
-      try {
-        await API.saveContractProjects(this.editingContract.id, {
-          name,
-          projectIds: this.editForm.projects.map((p) => p.projectId)
-        });
-        ElMessage.success('保存成功');
-        this.editDialogVisible = false;
-        await this.loadContracts();
-      } catch (error) {
-        ElMessage.error(error.message || '保存失败');
-      }
-      this.editSaving = false;
-    },
-    async confirmDelete(row) {
+    async remove(item) {
       try {
         await ElMessageBox.confirm(
-          '确定删除合同「' + row.name + '」？将同时解除与所有项目的关联。',
-          '删除合同',
-          { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+          '确定要删除该工程项目吗？仅当归属归档数为 0 时可删除。',
+          '确认删除',
+          { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
         );
-        await API.deleteContract(row.id);
-        ElMessage.success('已删除');
-        await this.loadContracts();
-      } catch (error) {
-        if (error !== 'cancel' && error !== 'close') {
-          ElMessage.error(error.message || '删除失败');
-        }
+      } catch (e) {
+        return;
       }
+      try {
+        await API.deleteMasterProject(item.id);
+        ElMessage.success('工程项目已删除');
+        await this.load();
+      } catch (error) {
+        ElMessage.error(error.message || '删除失败');
+      }
+    },
+    archiveCountText(item) {
+      const c = item.categoryCounts || {};
+      const parts = [];
+      if (c.tender) parts.push('招标 ' + c.tender);
+      if (c.cost) parts.push('造价 ' + c.cost);
+      if (c.consult) parts.push('咨询 ' + c.consult);
+      return parts;
     }
   },
   template: `
-    <div class="page-container">
-      <div class="page-head">
-        <div class="head-actions">
-          <el-button type="primary" @click="openCreateDialog">新建合同</el-button>
+    <div class="page-container mp-page" v-loading="loading">
+      <div class="banner mp-banner">
+        工程项目是<b>业主的立项工程</b>，只用于把归档项目分组，不代表本公司承接的业务。
+      </div>
+
+      <div class="mp-toolbar">
+        <div class="mp-filters">
+          <el-input v-model="search" class="mp-search" placeholder="搜索工程项目名称、建设单位、编号" clearable @input="onSearchInput" @clear="onSearchInput" />
+          <el-input v-model="ownerName" placeholder="建设单位" clearable style="width: 180px;" @change="onFilterChange" />
+          <el-select v-model="year" clearable placeholder="年份" style="width: 120px;" @change="onFilterChange">
+            <el-option v-for="y in yearOptions" :key="y" :label="y + ' 年'" :value="y" />
+          </el-select>
+          <el-select v-model="status" clearable placeholder="状态" style="width: 120px;" @change="onFilterChange">
+            <el-option label="进行中" value="active" />
+            <el-option label="已完工" value="closed" />
+            <el-option label="已暂停" value="paused" />
+          </el-select>
+        </div>
+        <div class="mp-actions">
+          <el-button type="primary" @click="openCreate">+ 新建工程项目</el-button>
         </div>
       </div>
 
-      <div style="padding: 20px;" v-loading="loading">
-        <div class="search-bar" style="margin-bottom: 16px;">
-          <div class="search-bar-filters contract-search-bar">
-            <el-input
-              v-model="searchText"
-              placeholder="输入关键词搜索..."
-              clearable
-              style="max-width: 360px;"
-            />
-            <el-radio-group v-model="searchType" size="small">
-              <el-radio-button label="contract">合同名称</el-radio-button>
-              <el-radio-button label="project">项目名称</el-radio-button>
-            </el-radio-group>
-          </div>
-        </div>
-
-        <el-table :data="contracts" stripe style="width: 100%;">
-          <el-table-column label="序号" width="80">
-            <template #default="{ $index }">{{ rowIndex($index) }}</template>
-          </el-table-column>
-          <el-table-column prop="name" label="合同名称" min-width="180" />
-          <el-table-column label="包含项目名称" min-width="280">
-            <template #default="{ row }">{{ formatProjectNames(row) }}</template>
-          </el-table-column>
-          <el-table-column prop="createdAt" label="创建时间" width="180" />
-          <el-table-column label="操作" width="140" fixed="right">
+      <div class="ap-table-card">
+        <el-table :data="items" style="width: 100%;" row-key="id">
+          <el-table-column label="工程项目" min-width="260">
             <template #default="{ row }">
-              <el-button size="small" type="primary" link @click="openEditDialog(row)">编辑</el-button>
-              <el-button size="small" type="danger" link @click="confirmDelete(row)">删除</el-button>
+              <div class="ap-name" @click="goDetail(row)">{{ row.name }}</div>
+              <div class="ap-sub">
+                {{ [row.region, row.industry, row.constructionScale].filter(Boolean).join(' · ') }}
+              </div>
+            </template>
+          </el-table-column>
+          <el-table-column label="编号" width="140">
+            <template #default="{ row }"><span class="ap-mono">{{ row.projectNo || '—' }}</span></template>
+          </el-table-column>
+          <el-table-column label="建设单位" min-width="200">
+            <template #default="{ row }">{{ row.ownerName || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="归属归档" min-width="180">
+            <template #default="{ row }">
+              <span v-if="archiveCountText(row).length === 0" class="ap-unassigned">暂无归档</span>
+              <span v-else class="mp-count-chips">
+                <span v-for="t in archiveCountText(row)" :key="t" class="ap-chip ap-chip--cat">{{ t }}</span>
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="负责人" width="96">
+            <template #default="{ row }">{{ row.manager || row.createdByName || '—' }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="160" fixed="right">
+            <template #default="{ row }">
+              <el-button text type="primary" @click="goDetail(row)">查看</el-button>
+              <el-button text @click="openEdit(row)">编辑</el-button>
+              <el-button v-if="isAdmin" text type="danger" @click="remove(row)">删除</el-button>
             </template>
           </el-table-column>
         </el-table>
 
-        <div style="margin-top: 20px; display: flex; justify-content: flex-end;">
+        <div v-if="!loading && items.length === 0" class="ap-empty">
+          暂无工程项目。工程项目可以现在建，也可以在新建归档时就地新建。
+        </div>
+
+        <div v-if="total > pageSize" class="ap-pager">
           <el-pagination
-            v-model:current-page="currentPage"
+            v-model:current-page="page"
             :page-size="pageSize"
             :total="total"
             layout="total, prev, pager, next"
-            @current-change="handlePageChange"
+            @current-change="onPageChange"
           />
         </div>
       </div>
 
-      <el-dialog v-model="createDialogVisible" title="新建合同" width="480px" :close-on-click-modal="false">
-        <el-form label-width="90px">
-          <el-form-item label="合同名称" required>
-            <el-input v-model="createForm.name" placeholder="请输入合同名称" maxlength="200" show-word-limit />
-          </el-form-item>
-        </el-form>
-        <template #footer>
-          <el-button @click="createDialogVisible = false">取消</el-button>
-          <el-button type="primary" :loading="createSaving" @click="saveCreate">保存</el-button>
-        </template>
-      </el-dialog>
-
-      <el-dialog v-model="editDialogVisible" title="编辑合同" width="720px" :close-on-click-modal="false">
-        <el-form label-width="90px">
-          <el-form-item label="合同名称" required>
-            <el-input v-model="editForm.name" placeholder="合同名称" maxlength="200" show-word-limit />
-          </el-form-item>
-          <el-form-item label="包含项目">
-            <el-table :data="editForm.projects" size="small" stripe style="width: 100%; margin-bottom: 12px;">
-              <el-table-column prop="projectName" label="项目名称" />
-              <el-table-column prop="createdByName" label="添加人" width="100">
-                <template #default="{ row }">{{ row.createdByName || (row.isNew ? (currentUser && currentUser.name) : '—') }}</template>
-              </el-table-column>
-              <el-table-column prop="createdAt" label="添加时间" width="160">
-                <template #default="{ row }">{{ row.createdAt || (row.isNew ? '待保存' : '—') }}</template>
-              </el-table-column>
-              <el-table-column label="操作" width="70">
-                <template #default="{ $index }">
-                  <el-button size="small" type="danger" link @click="removeProjectFromEditForm($index)">移除</el-button>
-                </template>
-              </el-table-column>
-            </el-table>
-            <div class="contract-edit-add-project">
-              <el-input
-                v-model="projectSearchText"
-                placeholder="搜索项目名称或编号..."
-                clearable
-                style="margin-bottom: 8px;"
-              />
-              <div v-loading="projectSearchLoading" class="contract-search-results">
-                <div
-                  v-for="item in projectSearchResults"
-                  :key="item.id"
-                  class="contract-search-result-item"
-                  :class="{ 'is-selected': selectedSearchProject && selectedSearchProject.id === item.id }"
-                  @click="selectSearchProject(item)"
-                >
-                  <span>{{ item.name }}</span>
-                  <el-tag v-if="item.projectNo" size="small" type="info" style="margin-left: 8px;">{{ item.projectNo }}</el-tag>
-                </div>
-                <div v-if="!projectSearchLoading && projectSearchResults.length === 0" class="contract-search-empty">
-                  输入关键词搜索项目
-                </div>
-              </div>
-              <el-button size="small" type="primary" plain style="margin-top: 8px;" @click="addProjectToEditForm">添加</el-button>
-            </div>
-          </el-form-item>
-        </el-form>
-        <template #footer>
-          <el-button @click="editDialogVisible = false">取消</el-button>
-          <el-button type="primary" :loading="editSaving" @click="saveEdit">保存</el-button>
-        </template>
-      </el-dialog>
+      <master-project-form-dialog v-model:visible="showForm" :project="editingProject" @saved="onSaved" />
     </div>
   `
 });
 
 // ============================================
-// 合同台账页面组件（大合同锚点）
+// 工程项目详情页
 // ============================================
+
+app.component('master-project-detail-page', {
+  emits: ['open-settings'],
+  props: {
+    masterProjectId: { type: String, required: true },
+    currentUser: { type: Object, default: null }
+  },
+  data() {
+    return {
+      loading: true,
+      detail: null,
+      showForm: false,
+      showCreateArchive: false
+    };
+  },
+  computed: {
+    isAdmin() {
+      const u = this.currentUser;
+      return !!(u && (u.role === 'admin' || u.roleCode === 'admin'));
+    },
+    canEdit() {
+      if (!this.detail || !this.currentUser) return false;
+      return this.isAdmin || this.detail.createdBy === this.currentUser.id;
+    },
+    statusCounts() {
+      return (this.detail && this.detail.statusCounts) || { draft: 0, pending_review: 0, pending_paper: 0, archived: 0, total: 0 };
+    }
+  },
+  async mounted() {
+    await this.load();
+  },
+  methods: {
+    navigateTo(path) {
+      window.navigateTo(path);
+    },
+    async load() {
+      this.loading = true;
+      try {
+        this.detail = await API.getMasterProject(this.masterProjectId);
+      } catch (error) {
+        ElMessage.error('加载工程项目失败: ' + error.message);
+        this.detail = null;
+      }
+      this.loading = false;
+    },
+    statusLabel(status) {
+      const map = {
+        draft: '草稿',
+        pending_review: '待审核',
+        review_rejected: '审核不通过',
+        review_approved: '审核通过',
+        pending_paper: '待纸质核对',
+        archived: '已归档'
+      };
+      return map[status] || status || '—';
+    },
+    goProject(project) {
+      this.navigateTo('#/project/' + project.id);
+    },
+    onSaved() {
+      this.load();
+    },
+    onArchiveCreated(projectId) {
+      this.navigateTo('#/project/' + projectId);
+    },
+    async removeMaster() {
+      if (!this.detail) return;
+      try {
+        await ElMessageBox.confirm(
+          '确定要删除该工程项目吗？仅当归属归档数为 0 时可删除。',
+          '确认删除',
+          { confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning' }
+        );
+      } catch (e) {
+        return;
+      }
+      try {
+        await API.deleteMasterProject(this.detail.id);
+        ElMessage.success('工程项目已删除');
+        this.navigateTo('#/master-projects');
+      } catch (error) {
+        ElMessage.error(error.message || '删除失败');
+      }
+    }
+  },
+  template: `
+    <div class="page-container mp-detail" v-loading="loading">
+      <div class="page-crumb">
+        <a href="javascript:;" @click="navigateTo('#/master-projects')">工程项目</a>
+        <span>/</span>
+        <b>{{ detail ? detail.name : '' }}</b>
+      </div>
+
+      <template v-if="detail">
+        <div class="mp-hero">
+          <div class="mp-hero-main">
+            <h2>{{ detail.name }}</h2>
+            <div class="mp-hero-meta">
+              <span>编号 <b>{{ detail.projectNo || '—' }}</b></span>
+              <span>建设单位 <b>{{ detail.ownerName || '—' }}</b></span>
+              <span>地区 <b>{{ detail.region || '—' }}</b></span>
+              <span>总投资 <b>{{ detail.totalInvestment == null ? '—' : detail.totalInvestment + ' 万元' }}</b></span>
+              <span>负责人 <b>{{ detail.manager || detail.createdByName || '—' }}</b></span>
+            </div>
+          </div>
+          <div class="mp-hero-actions">
+            <el-button v-if="canEdit" @click="showForm = true">编辑</el-button>
+            <el-button type="primary" @click="showCreateArchive = true">+ 添加归档项目</el-button>
+            <el-button v-if="isAdmin" text type="danger" @click="removeMaster">删除</el-button>
+          </div>
+        </div>
+
+        <div class="ap-table-card mp-detail-table">
+          <div class="mp-section-hd">
+            <h3>归属归档 <span>本公司在此工程下承接的服务，各自独立归档</span></h3>
+            <span class="mp-section-count">共 {{ detail.projects.length }} 个</span>
+          </div>
+          <el-table :data="detail.projects" style="width: 100%;" row-key="id">
+            <el-table-column label="类型" width="110">
+              <template #default="{ row }"><span class="ap-chip ap-chip--cat">{{ row.categoryName || '—' }}</span></template>
+            </el-table-column>
+            <el-table-column label="归档项目" min-width="240">
+              <template #default="{ row }">
+                <div class="ap-name" @click="goProject(row)">{{ row.name }}</div>
+              </template>
+            </el-table-column>
+            <el-table-column label="编号" width="140">
+              <template #default="{ row }"><span class="ap-mono">{{ row.projectNo || '—' }}</span></template>
+            </el-table-column>
+            <el-table-column label="归档状态" width="112">
+              <template #default="{ row }"><span class="ap-chip">{{ statusLabel(row.status) }}</span></template>
+            </el-table-column>
+            <el-table-column label="负责人" width="96">
+              <template #default="{ row }">{{ row.createdByName || '—' }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="110" fixed="right">
+              <template #default="{ row }">
+                <el-button text type="primary" @click="goProject(row)">进入归档</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <div v-if="detail.projects.length === 0" class="ap-empty">
+            该工程项目下暂无归档。可以先建工程后补归档。
+          </div>
+        </div>
+
+        <div class="ap-table-card mp-progress">
+          <div class="mp-section-hd"><h3>归档进度</h3><span>按归档项目汇总，纸质档单独计</span></div>
+          <div class="mp-stats">
+            <div class="mp-stat"><div class="k">归档项目</div><div class="v">{{ statusCounts.total }}</div></div>
+            <div class="mp-stat"><div class="k">草稿</div><div class="v">{{ statusCounts.draft || 0 }}</div></div>
+            <div class="mp-stat"><div class="k">待审核</div><div class="v">{{ statusCounts.pending_review || 0 }}</div></div>
+            <div class="mp-stat"><div class="k">已归档</div><div class="v">{{ statusCounts.archived || 0 }}</div></div>
+            <div class="mp-stat"><div class="k">纸质档待核对</div><div class="v">{{ statusCounts.pending_paper || 0 }}</div></div>
+          </div>
+        </div>
+      </template>
+
+      <div v-else-if="!loading" class="ap-empty">工程项目不存在或已被删除</div>
+
+      <master-project-form-dialog v-model:visible="showForm" :project="detail" @saved="onSaved" />
+      <archive-project-create-dialog
+        v-model:visible="showCreateArchive"
+        :preset-master-project="detail"
+        @created="onArchiveCreated"
+      />
+    </div>
+  `
+});
 
 function emptyContractForm() {
   return {
@@ -6507,7 +6095,6 @@ function emptyContractForm() {
     isConsolidatedTax: false,
     creditCodeRaw: '',
     contractAmount: '',
-    isAnchor: false,
     parentContractId: '',
     isPayment: false
   };
@@ -6531,7 +6118,6 @@ function contractFormFromDetail(detail) {
     isConsolidatedTax: !!detail.isConsolidatedTax,
     creditCodeRaw: detail.creditCodeRaw || '',
     contractAmount: detail.contractAmount == null ? '' : detail.contractAmount,
-    isAnchor: !!detail.isAnchor,
     parentContractId: detail.parentContractId || '',
     isPayment: !!detail.isPayment
   };
@@ -6551,28 +6137,17 @@ app.component('admin-contract-ledger-page', {
       loading: false,
       exporting: false,
       searchText: '',
-      searchType: 'contract',
-      filterAnchorOnly: false,
       filterPaymentOnly: false,
       filterChildOnly: false,
-      filterLinkStatus: '',
       filterMissingCredit: false,
       searchDebounceTimer: null,
-      anchorOptions: [],
       formDialogVisible: false,
       formMode: 'create',
       formSaving: false,
       form: emptyContractForm(),
       editingContract: null,
-      formProjects: [],
-      formChildren: [],
-      formStats: null,
-      formParent: null,
-      projectSearchText: '',
-      projectSearchResults: [],
-      projectSearchLoading: false,
-      selectedSearchProject: null,
-      projectSearchDebounceTimer: null
+      parentOptions: [],
+      parentLoading: false
     };
   },
   computed: {
@@ -6580,9 +6155,9 @@ app.component('admin-contract-ledger-page', {
       const u = this.currentUser;
       return !!(u && (u.role === 'admin' || u.roleCode === 'admin'));
     },
-    availableAnchorOptions() {
+    parentSelectOptions() {
       const selfId = this.editingContract && this.editingContract.id;
-      return (this.anchorOptions || []).filter((c) => c.id !== selfId && !c.isPayment);
+      return (this.parentOptions || []).filter((c) => c.id !== selfId);
     }
   },
   watch: {
@@ -6593,36 +6168,21 @@ app.component('admin-contract-ledger-page', {
         this.loadContracts();
       }, 300);
     },
-    searchType() {
-      this.currentPage = 1;
-      this.loadContracts();
-    },
-    filterAnchorOnly() { this._reloadFirstPage(); },
     filterPaymentOnly() { this._reloadFirstPage(); },
     filterChildOnly() { this._reloadFirstPage(); },
-    filterLinkStatus() { this._reloadFirstPage(); },
-    filterMissingCredit() { this._reloadFirstPage(); },
-    projectSearchText(val) {
-      if (this.projectSearchDebounceTimer) clearTimeout(this.projectSearchDebounceTimer);
-      this.projectSearchDebounceTimer = setTimeout(() => {
-        this.searchProjectsForForm(val);
-      }, 300);
-    }
+    filterMissingCredit() { this._reloadFirstPage(); }
   },
   async mounted() {
     if (!this.isAdmin) {
-      window.navigateTo('#/home');
+      window.navigateTo('#/projects');
       return;
     }
-    await Promise.all([this.loadContracts(), this.loadAnchorOptions()]);
+    await this.loadContracts();
   },
   methods: {
     _reloadFirstPage() {
       this.currentPage = 1;
       this.loadContracts();
-    },
-    goHome() {
-      window.navigateTo('#/home');
     },
     async loadContracts() {
       this.loading = true;
@@ -6631,27 +6191,16 @@ app.component('admin-contract-ledger-page', {
           page: this.currentPage,
           pageSize: this.pageSize,
           search: this.searchText,
-          searchType: this.searchType,
-          anchorOnly: this.filterAnchorOnly,
           paymentOnly: this.filterPaymentOnly,
           childOnly: this.filterChildOnly,
-          linkStatus: this.filterLinkStatus,
           missingCredit: this.filterMissingCredit
         });
         this.contracts = res.items || [];
         this.total = res.total || 0;
       } catch (error) {
-        ElMessage.error('加载合同列表失败: ' + error.message);
+        ElMessage.error('加载合同台账失败: ' + error.message);
       }
       this.loading = false;
-    },
-    async loadAnchorOptions() {
-      try {
-        const res = await API.listContracts({ page: 1, pageSize: 1000, anchorOnly: true });
-        this.anchorOptions = (res.items || []).filter((c) => c.isAnchor);
-      } catch (error) {
-        this.anchorOptions = [];
-      }
     },
     handlePageChange(page) {
       this.currentPage = page;
@@ -6663,31 +6212,28 @@ app.component('admin-contract-ledger-page', {
       if (!Number.isFinite(n)) return '—';
       return n.toLocaleString('zh-CN', { maximumFractionDigits: 4 });
     },
-    formatProjectNames(row) {
-      const names = row.projectNames || [];
-      if (names.length === 0) return '—';
-      if (names.length <= 2) return names.join('、');
-      return `${names.slice(0, 2).join('、')} 等 ${names.length} 个`;
-    },
     legacyIssueText(row) {
       const extra = row && row.legacyExtra;
       if (!extra) return '';
       const issues = Array.isArray(extra.issues) ? extra.issues : [];
       return issues.map((it) => (typeof it === 'string' ? it : it.message || '')).filter(Boolean).join('；');
     },
+    async loadParentOptions() {
+      this.parentLoading = true;
+      try {
+        const res = await API.listContracts({ page: 1, pageSize: 2000 });
+        this.parentOptions = res.items || [];
+      } catch (error) {
+        this.parentOptions = [];
+      }
+      this.parentLoading = false;
+    },
     openCreateDialog() {
       this.formMode = 'create';
       this.editingContract = null;
       this.form = emptyContractForm();
-      this.formProjects = [];
-      this.formChildren = [];
-      this.formStats = null;
-      this.formParent = null;
-      this.projectSearchText = '';
-      this.projectSearchResults = [];
-      this.selectedSearchProject = null;
       this.formDialogVisible = true;
-      this.loadAnchorOptions();
+      this.loadParentOptions();
     },
     async openEditDialog(row) {
       try {
@@ -6695,34 +6241,10 @@ app.component('admin-contract-ledger-page', {
         this.formMode = 'edit';
         this.editingContract = detail;
         this.form = contractFormFromDetail(detail);
-        this.formProjects = (detail.projects || []).map((p) => ({ ...p }));
-        this.formChildren = detail.children || [];
-        this.formStats = detail.stats || null;
-        this.formParent = detail.parent || null;
-        this.projectSearchText = '';
-        this.projectSearchResults = [];
-        this.selectedSearchProject = null;
         this.formDialogVisible = true;
-        await this.loadAnchorOptions();
-        if (this.form.isAnchor) this.searchProjectsForForm('');
+        await this.loadParentOptions();
       } catch (error) {
         ElMessage.error('加载合同详情失败: ' + error.message);
-      }
-    },
-    onPaymentChange(value) {
-      if (value) {
-        this.form.isAnchor = false;
-        this.form.parentContractId = '';
-      }
-    },
-    onAnchorChange(value) {
-      if (value) {
-        if (this.form.parentContractId) {
-          ElMessage.warning('请先清除“所属大合同”，再将合同标记为大合同');
-          this.form.isAnchor = false;
-          return;
-        }
-        this.form.isPayment = false;
       }
     },
     async saveForm() {
@@ -6731,114 +6253,39 @@ app.component('admin-contract-ledger-page', {
         ElMessage.warning('请输入合同名称');
         return;
       }
-      if (this.form.isPayment && this.form.isAnchor) {
-        ElMessage.warning('付款类合同不能标记为大合同');
-        return;
-      }
-      if (this.form.isAnchor && this.form.parentContractId) {
-        ElMessage.warning('大合同不能同时挂在其他合同下');
-        return;
-      }
       this.formSaving = true;
       try {
+        const payload = { ...this.form, name };
         if (this.formMode === 'create') {
-          const created = await API.createContract({ ...this.form, name });
-          if (this.form.isAnchor && this.formProjects.length > 0) {
-            await API.saveContractProjects(created.id, {
-              projectIds: this.formProjects.map((p) => p.projectId)
-            });
-          }
-          ElMessage.success('合同已创建');
+          await API.createContract(payload);
         } else {
-          await API.updateContract(this.editingContract.id, { ...this.form, name });
-          if (this.form.isAnchor) {
-            await API.saveContractProjects(this.editingContract.id, {
-              projectIds: this.formProjects.map((p) => p.projectId)
-            });
-          }
-          ElMessage.success('合同已保存');
+          await API.updateContract(this.editingContract.id, payload);
         }
+        ElMessage.success('保存成功');
         this.formDialogVisible = false;
-        await Promise.all([this.loadContracts(), this.loadAnchorOptions()]);
+        await this.loadContracts();
       } catch (error) {
         ElMessage.error(error.message || '保存失败');
       }
       this.formSaving = false;
     },
-    async toggleAnchor(row, value) {
-      try {
-        await API.updateContract(row.id, { isAnchor: value });
-        ElMessage.success(value ? '已标记为大合同' : '已取消大合同');
-        await Promise.all([this.loadContracts(), this.loadAnchorOptions()]);
-      } catch (error) {
-        ElMessage.error(error.message || '操作失败');
-        await this.loadContracts();
-      }
-    },
     async confirmDelete(row) {
       try {
-        await ElMessageBox.confirm(
-          '确定删除合同「' + row.name + '」？删除后不可恢复。',
-          '删除合同',
-          { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
-        );
-        await API.deleteContract(row.id);
-        ElMessage.success('已删除');
-        await Promise.all([this.loadContracts(), this.loadAnchorOptions()]);
-      } catch (error) {
-        if (error !== 'cancel' && error !== 'close') {
-          ElMessage.error(error.message || '删除失败');
-        }
-      }
-    },
-    async searchProjectsForForm(q) {
-      if (!this.form.isAnchor) {
-        this.projectSearchResults = [];
-        return;
-      }
-      this.projectSearchLoading = true;
-      try {
-        const linkedIds = new Set(this.formProjects.map((p) => p.projectId));
-        const res = await API.searchContractsForAdmin({
-          q: q || '',
-          page: 1,
-          pageSize: 20,
-          excludeContractId: this.editingContract ? this.editingContract.id : ''
+        await ElMessageBox.confirm('确定要删除此合同吗？删除后不可恢复。', '确认删除', {
+          confirmButtonText: '删除',
+          cancelButtonText: '取消',
+          type: 'warning'
         });
-        this.projectSearchResults = (res.items || []).filter((p) => !linkedIds.has(p.id));
+      } catch (e) {
+        return;
+      }
+      try {
+        await API.deleteContract(row.id);
+        ElMessage.success('合同已删除');
+        await this.loadContracts();
       } catch (error) {
-        ElMessage.error('搜索项目失败: ' + error.message);
-        this.projectSearchResults = [];
+        ElMessage.error(error.message || '删除失败');
       }
-      this.projectSearchLoading = false;
-    },
-    selectSearchProject(project) {
-      this.selectedSearchProject = project;
-    },
-    addProjectToForm() {
-      if (!this.selectedSearchProject) {
-        ElMessage.warning('请先从搜索结果中选择项目');
-        return;
-      }
-      const p = this.selectedSearchProject;
-      if (this.formProjects.some((item) => item.projectId === p.id)) {
-        ElMessage.warning('该项目已在列表中');
-        return;
-      }
-      this.formProjects.push({
-        linkId: '',
-        projectId: p.id,
-        projectName: p.name,
-        createdBy: this.currentUser ? this.currentUser.id : '',
-        createdByName: this.currentUser ? (this.currentUser.name || '') : '',
-        createdAt: '',
-        isNew: true
-      });
-      this.selectedSearchProject = null;
-      this.projectSearchResults = this.projectSearchResults.filter((item) => item.id !== p.id);
-    },
-    removeProjectFromForm(index) {
-      this.formProjects.splice(index, 1);
     },
     async exportAll() {
       this.exporting = true;
@@ -6847,11 +6294,8 @@ app.component('admin-contract-ledger-page', {
           page: 1,
           pageSize: 10000,
           search: this.searchText,
-          searchType: this.searchType,
-          anchorOnly: this.filterAnchorOnly,
           paymentOnly: this.filterPaymentOnly,
           childOnly: this.filterChildOnly,
-          linkStatus: this.filterLinkStatus,
           missingCredit: this.filterMissingCredit
         });
         Export.exportContractsToExcel(res.items || []);
@@ -6865,8 +6309,12 @@ app.component('admin-contract-ledger-page', {
   template: `
     <div class="page-container">
       <div class="page-head">
+        <div>
+          <div class="head-title">合同台账</div>
+          <div class="cl-subtitle">印花税台账 · 管理员维护</div>
+        </div>
         <div class="head-actions">
-          <el-button type="primary" @click="openCreateDialog">新建合同</el-button>
+          <el-button type="primary" @click="openCreateDialog">+ 新增</el-button>
           <el-button :loading="exporting" @click="exportAll">导出合同台账</el-button>
         </div>
       </div>
@@ -6876,22 +6324,13 @@ app.component('admin-contract-ledger-page', {
           <div class="search-bar-filters contract-search-bar">
             <el-input
               v-model="searchText"
-              placeholder="合同名称 / 对方企业 / 合同性质 / 关联项目"
+              placeholder="合同名称 / 对方企业 / 合同性质"
               clearable
               style="max-width: 380px;"
             />
-            <el-radio-group v-model="searchType" size="small">
-              <el-radio-button label="contract">合同/对方/性质</el-radio-button>
-              <el-radio-button label="project">项目名称</el-radio-button>
-            </el-radio-group>
-            <el-checkbox v-model="filterAnchorOnly">仅大合同</el-checkbox>
             <el-checkbox v-model="filterPaymentOnly">仅付款类</el-checkbox>
             <el-checkbox v-model="filterChildOnly">仅子合同</el-checkbox>
             <el-checkbox v-model="filterMissingCredit">缺信用代码</el-checkbox>
-            <el-select v-model="filterLinkStatus" clearable placeholder="关联状态" style="width: 140px;">
-              <el-option label="有关联项目" value="linked" />
-              <el-option label="无关联项目" value="unlinked" />
-            </el-select>
           </div>
         </div>
 
@@ -6899,16 +6338,7 @@ app.component('admin-contract-ledger-page', {
           <el-table-column label="序号" width="76">
             <template #default="{ row }">{{ row.seqNo || '—' }}</template>
           </el-table-column>
-          <el-table-column label="大合同" width="84" align="center">
-            <template #default="{ row }">
-              <el-switch
-                :model-value="row.isAnchor"
-                :disabled="row.isPayment"
-                @change="(val) => toggleAnchor(row, val)"
-              />
-            </template>
-          </el-table-column>
-          <el-table-column label="合同名称" min-width="260">
+          <el-table-column label="合同名称" min-width="280">
             <template #default="{ row }">
               <div class="contract-name-cell" :title="row.name">
                 <span>{{ row.name }}</span>
@@ -6919,12 +6349,9 @@ app.component('admin-contract-ledger-page', {
             </template>
           </el-table-column>
           <el-table-column prop="counterparty" label="对方企业" min-width="180" show-overflow-tooltip />
-          <el-table-column prop="natureRaw" label="合同性质" min-width="160" show-overflow-tooltip />
-          <el-table-column label="合同日期" width="118">
-            <template #default="{ row }">{{ row.contractDateRaw || row.contractDate || '—' }}</template>
-          </el-table-column>
-          <el-table-column label="代理费(万元)" width="120" align="right">
-            <template #default="{ row }">{{ formatMoney(row.agencyFee) }}</template>
+          <el-table-column prop="natureRaw" label="合同性质" min-width="150" show-overflow-tooltip />
+          <el-table-column label="合同金额(万元)" width="130" align="right">
+            <template #default="{ row }">{{ formatMoney(row.contractAmount) }}</template>
           </el-table-column>
           <el-table-column label="应贴花(元)" width="110" align="right">
             <template #default="{ row }">{{ formatMoney(row.stampTaxDue) }}</template>
@@ -6945,23 +6372,10 @@ app.component('admin-contract-ledger-page', {
               </el-tag>
             </template>
           </el-table-column>
-          <el-table-column label="信用代码" min-width="180" show-overflow-tooltip>
-            <template #default="{ row }">{{ row.creditCodeRaw || '—' }}</template>
-          </el-table-column>
-          <el-table-column label="子合同" width="80" align="center">
-            <template #default="{ row }">{{ row.childCount || 0 }}</template>
-          </el-table-column>
-          <el-table-column label="关联项目" width="90" align="center">
+          <el-table-column label="操作" width="120" fixed="right">
             <template #default="{ row }">
-              <el-tooltip :content="formatProjectNames(row)" placement="top">
-                <span class="contract-project-count">{{ row.projectCount || 0 }}</span>
-              </el-tooltip>
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="130" fixed="right">
-            <template #default="{ row }">
-              <el-button size="small" type="primary" link @click="openEditDialog(row)">编辑</el-button>
-              <el-button size="small" type="danger" link @click="confirmDelete(row)">删除</el-button>
+              <el-button size="small" type="primary" text @click="openEditDialog(row)">编辑</el-button>
+              <el-button size="small" type="danger" text @click="confirmDelete(row)">删除</el-button>
             </template>
           </el-table-column>
         </el-table>
@@ -6979,8 +6393,8 @@ app.component('admin-contract-ledger-page', {
 
       <el-dialog
         v-model="formDialogVisible"
-        :title="formMode === 'create' ? '新建合同' : '编辑合同'"
-        width="980px"
+        :title="formMode === 'create' ? '新增合同' : '编辑合同'"
+        width="920px"
         top="4vh"
         :close-on-click-modal="false"
         destroy-on-close
@@ -6988,20 +6402,6 @@ app.component('admin-contract-ledger-page', {
         <div v-if="formMode === 'edit' && editingContract && editingContract.source === 'legacy'" class="contract-legacy-hint">
           历史导入合同：序号 {{ editingContract.seqNo }}，来源 {{ editingContract.legacySheet }} 第 {{ editingContract.legacyRow }} 行
           <span v-if="legacyIssueText(editingContract)">；异常：{{ legacyIssueText(editingContract) }}</span>
-        </div>
-
-        <div v-if="formMode === 'edit' && form.isAnchor && formStats" class="contract-stats-panel">
-          <div class="contract-stat"><span>大合同金额</span><b>{{ formatMoney(formStats.contractAmount) }} 万元</b></div>
-          <div class="contract-stat"><span>关联项目</span><b>{{ formStats.projectCount }} 个</b></div>
-          <div class="contract-stat"><span>项目总投资</span><b>{{ formatMoney(formStats.totalInvestment) }} 万元</b></div>
-          <div class="contract-stat"><span>项目中标金额</span><b>{{ formatMoney(formStats.winAmount) }} 万元</b></div>
-          <div class="contract-stat"><span>子合同</span><b>{{ formStats.childCount }} 个</b></div>
-          <div class="contract-stat"><span>子合同代理费</span><b>{{ formatMoney(formStats.childAgencyFee) }} 万元</b></div>
-        </div>
-        <div v-if="formMode === 'edit' && form.isAnchor && formStats && formStats.categories && formStats.categories.length > 0" class="contract-category-stats">
-          <span v-for="cat in formStats.categories" :key="cat.code || cat.name" class="contract-category-stat">
-            {{ cat.name }}：{{ cat.projectCount }} 个 / 投资 {{ formatMoney(cat.totalInvestment) }} 万 / 中标 {{ formatMoney(cat.winAmount) }} 万
-          </span>
         </div>
 
         <el-form label-width="118px" class="contract-form-grid">
@@ -7018,13 +6418,13 @@ app.component('admin-contract-ledger-page', {
             <el-input v-model="form.contractDateRaw" placeholder="如 2022 / 2022-03 / 2022-03-10" />
           </el-form-item>
           <el-form-item label="合同金额(万元)">
-            <el-input v-model="form.contractAmount" type="number" placeholder="大合同自身金额，可空" />
+            <el-input v-model="form.contractAmount" type="number" placeholder="可空" />
           </el-form-item>
           <el-form-item label="总投资额(万元)">
-            <el-input v-model="form.totalInvestment" type="number" placeholder="项目总投资，可空" />
+            <el-input v-model="form.totalInvestment" type="number" placeholder="可空" />
           </el-form-item>
           <el-form-item label="代理费(万元)">
-            <el-input v-model="form.agencyFee" type="number" placeholder="代理费，可空" />
+            <el-input v-model="form.agencyFee" type="number" placeholder="可空" />
           </el-form-item>
           <el-form-item label="应贴花(元)">
             <el-input v-model="form.stampTaxDue" type="number" placeholder="手填，不自动计算" />
@@ -7060,22 +6460,19 @@ app.component('admin-contract-ledger-page', {
             <el-switch v-model="form.isConsolidatedTax" active-text="是" inactive-text="否" />
           </el-form-item>
           <el-form-item label="付款类合同">
-            <el-switch v-model="form.isPayment" @change="onPaymentChange" />
+            <el-switch v-model="form.isPayment" />
           </el-form-item>
-          <el-form-item label="大合同">
-            <el-switch v-model="form.isAnchor" :disabled="form.isPayment" @change="onAnchorChange" />
-          </el-form-item>
-          <el-form-item label="所属大合同">
+          <el-form-item label="所属合同">
             <el-select
               v-model="form.parentContractId"
               clearable
               filterable
-              :disabled="form.isAnchor || form.isPayment"
-              placeholder="小合同挂靠的大合同"
+              :loading="parentLoading"
+              placeholder="可选：补充协议/付款挂主合同"
               style="width: 100%;"
             >
               <el-option
-                v-for="opt in availableAnchorOptions"
+                v-for="opt in parentSelectOptions"
                 :key="opt.id"
                 :label="(opt.seqNo ? opt.seqNo + ' ' : '') + opt.name"
                 :value="opt.id"
@@ -7084,9 +6481,9 @@ app.component('admin-contract-ledger-page', {
           </el-form-item>
         </el-form>
 
-        <div v-if="formMode === 'edit' && formChildren.length > 0" style="margin-top: 12px;">
+        <div v-if="formMode === 'edit' && editingContract && editingContract.children && editingContract.children.length > 0" style="margin-top: 12px;">
           <h4 class="contract-section-title">子合同</h4>
-          <el-table :data="formChildren" size="small" stripe>
+          <el-table :data="editingContract.children" size="small" stripe>
             <el-table-column prop="seqNo" label="序号" width="70" />
             <el-table-column prop="name" label="合同名称" min-width="240" />
             <el-table-column prop="contractDate" label="合同日期" width="120" />
@@ -7097,49 +6494,6 @@ app.component('admin-contract-ledger-page', {
           </el-table>
         </div>
 
-        <div v-if="form.isAnchor" style="margin-top: 12px;">
-          <h4 class="contract-section-title">关联项目</h4>
-          <el-table :data="formProjects" size="small" stripe style="width: 100%; margin-bottom: 12px;">
-            <el-table-column prop="projectName" label="项目名称" min-width="240" />
-            <el-table-column prop="createdByName" label="添加人" width="100">
-              <template #default="{ row }">{{ row.createdByName || (row.isNew ? (currentUser && currentUser.name) : '—') }}</template>
-            </el-table-column>
-            <el-table-column prop="createdAt" label="添加时间" width="160">
-              <template #default="{ row }">{{ row.createdAt || (row.isNew ? '待保存' : '—') }}</template>
-            </el-table-column>
-            <el-table-column label="操作" width="70">
-              <template #default="{ $index }">
-                <el-button size="small" type="danger" link @click="removeProjectFromForm($index)">移除</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-          <div class="contract-edit-add-project">
-            <el-input
-              v-model="projectSearchText"
-              placeholder="搜索项目名称或编号..."
-              clearable
-              style="margin-bottom: 8px;"
-            />
-            <div v-loading="projectSearchLoading" class="contract-search-results">
-              <div
-                v-for="item in projectSearchResults"
-                :key="item.id"
-                class="contract-search-result-item"
-                :class="{ 'is-selected': selectedSearchProject && selectedSearchProject.id === item.id }"
-                @click="selectSearchProject(item)"
-              >
-                <span>{{ item.name }}</span>
-                <el-tag v-if="item.projectNo" size="small" type="info" style="margin-left: 8px;">{{ item.projectNo }}</el-tag>
-              </div>
-              <div v-if="!projectSearchLoading && projectSearchResults.length === 0" class="contract-search-empty">
-                输入关键词搜索项目
-              </div>
-            </div>
-            <el-button size="small" type="primary" plain style="margin-top: 8px;" @click="addProjectToForm">添加</el-button>
-          </div>
-        </div>
-        <div v-else class="contract-legacy-hint">只有大合同可以关联项目；其他合同仅作为印花税台账记录。</div>
-
         <template #footer>
           <el-button @click="formDialogVisible = false">取消</el-button>
           <el-button type="primary" :loading="formSaving" @click="saveForm">保存</el-button>
@@ -7149,15 +6503,6 @@ app.component('admin-contract-ledger-page', {
   `
 });
 
-// ============================================
-// 管理员归档管理页面组件
-// ============================================
-
-/**
- * 管理员归档管理页面组件
- * 展示所有归档记录，支持分页和导出Excel
- * 仅管理员可访问
- */
 app.component('admin-archive-page', {
   emits: ['open-settings'],
   props: {

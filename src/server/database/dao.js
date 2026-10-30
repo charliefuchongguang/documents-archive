@@ -90,7 +90,9 @@ function createProject({
   categoryId = CATEGORY_TENDER_ID,
   procurementType = 'G',
   region = '',
-  projectNo = ''
+  projectNo = '',
+  masterProjectId = null,
+  ownerNameSnapshot = ''
 }) {
   const db = getDb();
   const resolvedCategoryId = categoryId || CATEGORY_TENDER_ID;
@@ -98,8 +100,9 @@ function createProject({
   const stmt = db.prepare(`
     INSERT INTO projects (
       id, name, status, created_by, created_by_name, updated_by, updated_by_name,
-      department_id, category_id, procurement_type, region, project_no
-    ) VALUES (?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      department_id, category_id, procurement_type, region, project_no,
+      master_project_id, owner_name_snapshot
+    ) VALUES (?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   stmt.run(
     id,
@@ -112,7 +115,9 @@ function createProject({
     resolvedCategoryId,
     type,
     region || '',
-    projectNo || ''
+    projectNo || '',
+    masterProjectId || null,
+    ownerNameSnapshot || ''
   );
   return getProjectWithDepartment(id);
 }
@@ -163,10 +168,14 @@ function getProjectWithDepartment(id) {
       c.code AS category_code,
       c.name AS category_name,
       c.sort_order AS category_sort_order,
-      c.nas_folder AS category_nas_folder
+      c.nas_folder AS category_nas_folder,
+      mp.name AS master_project_name,
+      mp.project_no AS master_project_no,
+      mp.owner_name AS master_project_owner_name
     FROM projects p
     LEFT JOIN departments d ON d.id = p.department_id
     LEFT JOIN project_categories c ON c.id = p.category_id
+    LEFT JOIN master_projects mp ON mp.id = p.master_project_id
     WHERE p.id = ?
   `).get(id);
 }
@@ -283,6 +292,7 @@ const PROJECT_LIST_FROM_JOIN = `
   LEFT JOIN departments d ON d.id = p.department_id
   LEFT JOIN project_categories c ON c.id = p.category_id
   LEFT JOIN project_search_index psi ON psi.project_id = p.id
+  LEFT JOIN master_projects mp ON mp.id = p.master_project_id
 `;
 
 /**
@@ -382,7 +392,10 @@ function getProjects({
   amountMin = '',
   amountMax = '',
   mileageMin = '',
-  mileageMax = ''
+  mileageMax = '',
+  masterProjectId = '',
+  years = [],
+  ownerNames = []
 } = {}) {
   const db = getDb();
   try {
@@ -400,17 +413,41 @@ function getProjects({
   if (search) {
     let fields;
     if (fieldKey === 'name_overview') {
-      fields = ['p.name', 'psi.project_overview'];
+      fields = ['p.name', 'p.project_no', 'p.owner_name_snapshot', 'mp.name', 'psi.project_overview'];
     } else if (SEARCH_FIELD_COLUMNS[fieldKey]) {
       fields = [SEARCH_FIELD_COLUMNS[fieldKey]];
     } else {
-      fields = ['p.name', 'psi.project_overview'];
+      fields = ['p.name', 'p.project_no', 'p.owner_name_snapshot', 'mp.name', 'psi.project_overview'];
     }
     const searchCondition = buildSearchCondition(search, fields);
     if (searchCondition) {
       conditions.push(searchCondition.condition);
       params.push(...searchCondition.params);
     }
+  }
+
+  const masterFilter = String(masterProjectId || '').trim();
+  if (masterFilter === 'unassigned') {
+    conditions.push('(p.master_project_id IS NULL OR p.master_project_id = \'\')');
+  } else if (masterFilter) {
+    conditions.push('p.master_project_id = ?');
+    params.push(masterFilter);
+  }
+
+  const normalizedYears = (Array.isArray(years) ? years : [])
+    .map((y) => String(y || '').trim())
+    .filter((y) => /^\d{4}$/.test(y));
+  if (normalizedYears.length > 0) {
+    conditions.push(`strftime('%Y', p.created_at) IN (${normalizedYears.map(() => '?').join(', ')})`);
+    params.push(...normalizedYears);
+  }
+
+  const normalizedOwners = (Array.isArray(ownerNames) ? ownerNames : [])
+    .map((n) => String(n || '').trim())
+    .filter(Boolean);
+  if (normalizedOwners.length > 0) {
+    conditions.push(`p.created_by_name IN (${normalizedOwners.map(() => '?').join(', ')})`);
+    params.push(...normalizedOwners);
   }
 
   if (categoryId) {
@@ -547,6 +584,9 @@ function getProjects({
       c.name AS category_name,
       c.sort_order AS category_sort_order,
       c.nas_folder AS category_nas_folder,
+      mp.name AS master_project_name,
+      mp.project_no AS master_project_no,
+      mp.owner_name AS master_project_owner_name,
       (SELECT COUNT(*) FROM files f WHERE f.project_id = p.id AND f.has_paper = 1) AS paper_total,
       (SELECT COUNT(*) FROM files f WHERE f.project_id = p.id AND f.has_paper = 1 AND f.paper_reviewed = 1) AS paper_confirmed
     ${PROJECT_LIST_FROM_JOIN}
@@ -599,6 +639,82 @@ function getProjectStats({
 }
 
 /**
+ * 可见范围内按服务类型统计归档项目数量（用于页内分类切换）
+ * @param {Object} options
+ * @returns {{ all: number, tender: number, cost: number, consult: number }}
+ */
+function getProjectCategoryCounts({ isPrivileged = false, userId = '', departmentId = '' } = {}) {
+  const db = getDb();
+  const { conditions, params } = buildProjectVisibilityConditions({ isPrivileged, userId, departmentId });
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const rows = db.prepare(`
+    SELECT c.code AS category_code, COUNT(*) AS cnt
+    ${PROJECT_LIST_FROM_JOIN}
+    ${whereClause}
+    GROUP BY c.code
+  `).all(...params);
+
+  const counts = { all: 0, tender: 0, cost: 0, consult: 0 };
+  for (const row of rows) {
+    const code = row.category_code || 'tender';
+    const n = Number(row.cnt) || 0;
+    if (counts[code] !== undefined) counts[code] += n;
+    counts.all += n;
+  }
+  return counts;
+}
+
+/**
+ * 可见范围内未归属工程项目的归档项目数量
+ * @param {Object} options
+ * @returns {number}
+ */
+function countUnassignedProjects({ isPrivileged = false, userId = '', departmentId = '' } = {}) {
+  const db = getDb();
+  const { conditions, params } = buildProjectVisibilityConditions({ isPrivileged, userId, departmentId });
+  conditions.push('(p.master_project_id IS NULL OR p.master_project_id = \'\')');
+  const whereClause = `WHERE ${conditions.join(' AND ')}`;
+  const row = db.prepare(`SELECT COUNT(*) AS cnt ${PROJECT_LIST_FROM_JOIN} ${whereClause}`).get(...params);
+  return Number(row?.cnt) || 0;
+}
+
+/**
+ * 修改归档项目的工程归属
+ * @param {string} projectId
+ * @param {string|null} masterProjectId
+ * @param {string} [ownerNameSnapshot]
+ * @returns {Object}
+ */
+function updateProjectMaster(projectId, masterProjectId, ownerNameSnapshot = '') {
+  const db = getDb();
+  const current = getProject(projectId);
+  if (!current) {
+    throw Object.assign(new Error('项目不存在'), { status: 404 });
+  }
+  const target = masterProjectId ? String(masterProjectId).trim() : '';
+  let snapshot = String(ownerNameSnapshot || '');
+  if (target) {
+    const master = db.prepare('SELECT id, owner_name FROM master_projects WHERE id = ?').get(target);
+    if (!master) {
+      throw Object.assign(new Error('工程项目不存在'), { status: 404 });
+    }
+    if (!snapshot) snapshot = master.owner_name || '';
+  } else {
+    snapshot = '';
+  }
+  db.prepare(`
+    UPDATE projects
+    SET master_project_id = ?, owner_name_snapshot = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `).run(target || null, snapshot, projectId);
+  try {
+    db.prepare('UPDATE project_search_index SET master_project_id = ? WHERE project_id = ?')
+      .run(target || null, projectId);
+  } catch (e) { /* 索引表可能尚未建立，忽略 */ }
+  return getProjectWithDepartment(projectId);
+}
+
+/**
  * 更新项目
  * @param {string} id - 项目 ID
  * @param {Object} data - 待更新的字段（camelCase 自动转 snake_case）
@@ -640,14 +756,6 @@ function updateProject(id, data) {
     } catch (e) {
       console.warn('[查询索引] 改名后重建失败:', e.message);
     }
-    try {
-      const updated = getProject(id);
-      if (updated && updated.name) {
-        require('./contractDao').syncProjectName(id, updated.name);
-      }
-    } catch (e) {
-      console.warn('[合同关联] 改名后同步 project_name 失败:', e.message);
-    }
   }
 
   return getProjectWithDepartment(id);
@@ -662,9 +770,6 @@ function deleteProject(id) {
   const transaction = db.transaction(() => {
     try {
       require('./projectSearchIndex').deleteProjectSearchIndex(id);
-    } catch (e) { /* 忽略 */ }
-    try {
-      require('./contractDao').deleteLinksByProjectId(id);
     } catch (e) { /* 忽略 */ }
     db.prepare('DELETE FROM merged_data WHERE project_id = ?').run(id);
     db.prepare('DELETE FROM files WHERE project_id = ?').run(id);
@@ -1061,7 +1166,9 @@ module.exports = {
   listProjectCategories,
   getProjectCategory,
   resolveProjectCategory,
-  createProject, getProject, getProjectWithDepartment, getProjectNasFolder, getProjects, getProjectStats, updateProject, deleteProject,
+  createProject, getProject, getProjectWithDepartment, getProjectNasFolder, getProjects, getProjectStats,
+  getProjectCategoryCounts, countUnassignedProjects, updateProjectMaster,
+  updateProject, deleteProject,
   findProjectByNameInCategory,
   isProjectOwner, canAccessProject, touchProjectUpdater, reassignProjectOwnership,
   createFile, getFile, getFilesByProject, getFilesByProjectAndSegment, getFilesForProjects, countFilesFromSegment, getFilesByIds,

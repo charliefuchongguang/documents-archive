@@ -88,6 +88,21 @@ function parseEnumQuery(req, paramName, allowed) {
 }
 
 /**
+ * 解析 query 中的普通多值参数（支持重复参数或逗号分隔）
+ * @param {import('express').Request} req
+ * @param {string} paramName
+ * @returns {string[]}
+ */
+function parseListQuery(req, paramName) {
+  const raw = req.query[paramName];
+  if (!raw) return [];
+  const list = Array.isArray(raw) ? raw : [raw];
+  return [...new Set(
+    list.flatMap((item) => String(item).split(',').map((s) => s.trim()).filter(Boolean))
+  )];
+}
+
+/**
  * 获取项目列表
  * GET /api/projects
  * 非 user 角色：全部；普通用户：本部门（无部门则仅归属人项目）
@@ -137,7 +152,10 @@ function listProjects(req, res) {
       amountMin: req.query.amountMin,
       amountMax: req.query.amountMax,
       mileageMin: req.query.mileageMin,
-      mileageMax: req.query.mileageMax
+      mileageMax: req.query.mileageMax,
+      masterProjectId: String(req.query.masterProjectId || '').trim(),
+      years: parseListQuery(req, 'year'),
+      ownerNames: parseListQuery(req, 'owner')
     };
 
     const result = dao.getProjects(listOptions);
@@ -146,6 +164,8 @@ function listProjects(req, res) {
       userId,
       departmentId
     });
+    const categoryCounts = dao.getProjectCategoryCounts({ isPrivileged, userId, departmentId });
+    const unassignedCount = dao.countUnassignedProjects({ isPrivileged, userId, departmentId });
 
     // 部门骨架：privileged 全部部门；普通用户仅本部门
     let departments = [];
@@ -169,7 +189,7 @@ function listProjects(req, res) {
       }
     }
 
-    res.json({ ...result, departments, stats });
+    res.json({ ...result, departments, stats, categoryCounts, unassignedCount });
   } catch (error) {
     console.error('[项目列表] 查询失败:', error.message);
     res.status(500).json({ error: error.message });
@@ -252,11 +272,11 @@ function createProject(req, res) {
     const name = String(req.body.name || '').trim();
     const region = String(req.body.region || '').trim();
     const procurementType = String(req.body.procurementType || req.body.procurement_type || 'G').trim().toUpperCase();
+    const masterProjectId = String(req.body.masterProjectId || req.body.master_project_id || '').trim();
     const { categoryId, categoryCode } = req.body;
 
     if (!name) return res.status(400).json({ error: '项目名称不能为空' });
-    if (!region) return res.status(400).json({ error: '请选择所属地域' });
-    if (!ALLOWED_REGIONS.has(region)) {
+    if (region && !ALLOWED_REGIONS.has(region)) {
       return res.status(400).json({ error: '所属地域无效' });
     }
     if (!['F', 'G', 'H'].includes(procurementType)) {
@@ -271,8 +291,13 @@ function createProject(req, res) {
       return res.status(400).json({ error: resolved.error });
     }
 
-    if (dao.findProjectByNameInCategory(name, resolved.category.id)) {
-      return res.status(409).json({ error: '同分类下已存在同名项目，请修改项目名称' });
+    let masterProject = null;
+    if (masterProjectId) {
+      const masterProjectDao = require('../database/masterProjectDao');
+      masterProject = masterProjectDao.getMasterProjectBrief(masterProjectId);
+      if (!masterProject) {
+        return res.status(400).json({ error: '所属工程项目不存在' });
+      }
     }
 
     const archiveDao = require('../database/archiveDao');
@@ -290,15 +315,13 @@ function createProject(req, res) {
       categoryId: resolved.category.id,
       procurementType,
       region,
-      projectNo
+      projectNo,
+      masterProjectId: masterProject ? masterProject.id : null,
+      ownerNameSnapshot: masterProject ? masterProject.ownerName : ''
     });
     res.status(201).json(project);
   } catch (error) {
     console.error('[创建项目] 失败:', error.message);
-    // 唯一索引冲突兜底
-    if (error && /UNIQUE|unique/i.test(String(error.message))) {
-      return res.status(409).json({ error: '同分类下已存在同名项目，请修改项目名称' });
-    }
     res.status(500).json({ error: error.message });
   }
 }
@@ -673,6 +696,37 @@ async function deleteProject(req, res) {
 }
 
 /**
+ * 修改归档项目的工程归属
+ * PATCH /api/projects/:id/master-project
+ * Body: { masterProjectId: string|null, ownerNameSnapshot?: string }
+ */
+function changeMasterProject(req, res) {
+  try {
+    const userId = req.user?.userid;
+    if (!userId) return res.status(401).json({ error: '未登录' });
+    const project = requireAccessibleProject(req, res, req.params.id);
+    if (!project) return;
+
+    const isAdmin = userMgmtDao.isUserAdmin(userId);
+    if (!isAdmin && project.created_by !== userId) {
+      return res.status(403).json({ error: '仅创建人或管理员可修改工程归属' });
+    }
+
+    const raw = req.body?.masterProjectId ?? req.body?.master_project_id;
+    const masterProjectId = raw === null || raw === undefined ? '' : String(raw).trim();
+    const snapshot = req.body?.ownerNameSnapshot ?? req.body?.owner_name_snapshot ?? '';
+
+    const updated = dao.updateProjectMaster(project.id, masterProjectId || null, String(snapshot || ''));
+    touchUpdaterFromReq(project.id, req.user);
+    res.json(updated);
+  } catch (error) {
+    const status = error.status || 500;
+    if (status >= 500) console.error('[修改工程归属] 失败:', error.message);
+    res.status(status).json({ error: error.message });
+  }
+}
+
+/**
  * 管理员：清空并全量重建查询辅助表
  * POST /api/projects/search-index/rebuild
  */
@@ -708,6 +762,7 @@ module.exports = {
   updateProcurementType,
   updateRegion,
   reassignOwnership,
+  changeMasterProject,
   deleteProject,
   rebuildSearchIndex,
 };

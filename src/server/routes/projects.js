@@ -18,11 +18,8 @@ router.post('/search-index/rebuild', requireAdmin, projectController.rebuildSear
 // 归档模板（须在 /:id 通用路由之前）
 router.put('/:id/archive-template', requireAuth, projectController.updateArchiveTemplate);
 
-// 项目合同关联（须在 /:id 通用路由之前）
-const contractController = require('../controllers/contractController');
-router.get('/:id/contracts', contractController.getProjectContracts);
-router.post('/:id/contracts', contractController.addProjectContract);
-router.delete('/:id/contracts/:linkId', contractController.removeProjectContract);
+// 修改归档项目的工程归属（须在 /:id 通用路由之前）
+router.patch('/:id/master-project', requireAuth, projectController.changeMasterProject);
 
 // 获取项目详情
 router.get('/:id', projectController.getProject);

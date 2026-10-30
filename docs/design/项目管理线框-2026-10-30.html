@@ -1,0 +1,702 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>线框稿 · 项目管理与合同台账</title>
+<style>
+:root{
+  --ink:#1f1f1f; --ink2:#595959; --ink3:#6b6b6b; --ink4:#6e6e6e;
+  --line:#e3e3e3; --line2:#cfcfcf; --bg:#f4f4f4; --card:#fff;
+  --fill:#fafafa; --fill2:#f0f0f0; --fill3:#e8e8e8;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif;
+  font-size:13px; color:var(--ink); background:var(--bg); line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+.docbar{
+  height:44px; background:#e9e9e9; border-bottom:1px solid #d5d5d5;
+  display:flex; align-items:center; gap:20px; padding:0 20px;
+  font-size:12px; color:var(--ink2); position:sticky; top:0; z-index:200;
+}
+.docbar b{font-weight:600; color:var(--ink); font-size:12px; letter-spacing:.3px;}
+.docbar .tabs{display:flex; gap:4px; margin-left:8px;}
+.docbar .tabs button{
+  font:inherit; font-size:12px; padding:5px 12px; border:1px solid transparent;
+  background:transparent; border-radius:5px; cursor:pointer; color:var(--ink2);
+}
+.docbar .tabs button:hover{background:#dedede;}
+.docbar .tabs button.on{background:#fff; border-color:#ccc; color:var(--ink); font-weight:500;}
+.docbar .meta{margin-left:auto; color:#5f5f5f; font-size:11.5px;}
+
+.app{display:flex; min-height:calc(100vh - 44px);}
+.side{
+  width:232px; flex:0 0 232px; background:var(--card);
+  border-right:1px solid var(--line); display:flex; flex-direction:column;
+  position:sticky; top:44px; height:calc(100vh - 44px);
+}
+.brand{
+  height:64px; display:flex; align-items:center; gap:9px; padding:0 20px;
+  font-size:15px; font-weight:600; border-bottom:1px solid var(--line);
+}
+.brand .mark{width:22px; height:22px; border:1.5px solid var(--ink); border-radius:6px; position:relative;}
+.brand .mark::after{content:""; position:absolute; inset:5px; border:1.5px solid var(--ink); border-radius:2px;}
+.nav{flex:1; padding:8px 12px; overflow:auto;}
+.group{font-size:11px; color:var(--ink3); letter-spacing:.6px; padding:16px 10px 6px;}
+.item{
+  height:36px; display:flex; align-items:center; gap:9px; padding:0 10px;
+  border-radius:6px; color:var(--ink2); font-size:13.5px; cursor:default;
+}
+.item .dot{width:6px; height:6px; border:1px solid var(--ink4); border-radius:50%; flex:0 0 auto;}
+.item.on{background:var(--fill2); color:var(--ink); font-weight:600;}
+.item.on .dot{background:var(--ink); border-color:var(--ink);}
+.item .count{margin-left:auto; font-size:12px; color:var(--ink3); font-variant-numeric:tabular-nums;}
+.item .tag-new{
+  margin-left:auto; font-size:10.5px; border:1px solid var(--line2); border-radius:3px;
+  padding:0 4px; color:var(--ink3); line-height:15px;
+}
+.sidefoot{border-top:1px solid var(--line); padding:14px 20px; display:flex; align-items:center; gap:10px;}
+.avatar{width:28px; height:28px; border-radius:50%; background:var(--fill3); display:flex;
+  align-items:center; justify-content:center; font-size:12px; font-weight:600;}
+.who{font-size:13px; font-weight:600;}
+.role{font-size:11.5px; color:var(--ink3);}
+
+.main{flex:1; min-width:0; display:flex; flex-direction:column;}
+.top{
+  height:64px; flex:0 0 64px; display:flex; align-items:center; justify-content:space-between;
+  gap:16px; padding:0 24px; background:var(--card); border-bottom:1px solid var(--line);
+  position:sticky; top:44px; z-index:50;
+}
+.crumb{font-size:13px; color:var(--ink3); display:flex; align-items:center; gap:6px;}
+.crumb .sep{color:var(--ink4);}
+.crumb b{color:var(--ink); font-weight:600; font-size:15px;}
+.top-right{display:flex; align-items:center; gap:10px;}
+.searchbox{
+  width:260px; height:32px; border:1px solid var(--line2); border-radius:4px;
+  display:flex; align-items:center; padding:0 10px; color:var(--ink4); font-size:12.5px; background:#fff;
+}
+.content{padding:20px 24px 40px; flex:1;}
+
+.btn{
+  height:32px; padding:0 14px; border-radius:4px; border:1px solid var(--line2);
+  background:#fff; font:inherit; font-size:13px; color:var(--ink2); cursor:pointer;
+  display:inline-flex; align-items:center; gap:6px; white-space:nowrap;
+}
+.btn:hover{border-color:var(--ink4);}
+.btn.primary{background:#2b2b2b; border-color:#2b2b2b; color:#fff;}
+.btn.primary:hover{background:#111;}
+.btn.sm{height:26px; padding:0 9px; font-size:12px;}
+.btn.link{border:none; background:none; color:var(--ink2); text-decoration:underline; padding:0;}
+.btn:disabled{color:var(--ink4); border-color:var(--line); background:var(--fill);}
+
+.card{background:var(--card); border:1px solid var(--line); border-radius:8px;}
+.filters{
+  background:var(--card); border:1px solid var(--line); border-radius:8px;
+  padding:12px; display:flex; gap:10px; align-items:center; margin-bottom:14px; flex-wrap:wrap;
+}
+.f{
+  height:32px; border:1px solid var(--line2); border-radius:4px; background:#fff;
+  padding:0 10px; font-size:12.5px; color:var(--ink3); display:flex; align-items:center;
+  gap:24px; min-width:110px;
+}
+.f.wide{min-width:220px; color:var(--ink4);}
+.f .caret{font-size:10px; color:var(--ink4); margin-left:auto;}
+
+table{width:100%; border-collapse:collapse;}
+thead th{
+  background:var(--fill); font-weight:500; font-size:12px; color:var(--ink2);
+  text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); white-space:nowrap;
+}
+tbody td{padding:12px; border-bottom:1px solid #f0f0f0; font-size:13px; color:var(--ink); vertical-align:middle;}
+tbody tr:last-child td{border-bottom:none;}
+tbody tr:hover{background:#fcfcfc;}
+.t-main{font-weight:600;}
+.t-sub{font-size:11.5px; color:var(--ink3); margin-top:2px;}
+.num{font-variant-numeric:tabular-nums;}
+.right{text-align:right;}
+
+.chip{
+  display:inline-flex; align-items:center; height:20px; padding:0 7px; border-radius:3px;
+  font-size:11.5px; border:1px solid var(--line2); color:var(--ink2); background:#fff;
+}
+.chip.solid{background:var(--fill2); border-color:var(--line2);}
+.chip.dash{border-style:dashed; color:var(--ink3);}
+.chips{display:flex; gap:6px; flex-wrap:wrap;}
+
+.pager{display:flex; align-items:center; justify-content:flex-end; gap:8px; padding:12px; color:var(--ink3); font-size:12.5px;}
+.pager .pg{width:26px; height:26px; border:1px solid var(--line2); border-radius:4px; display:flex;
+  align-items:center; justify-content:center; background:#fff; font-size:12px; color:var(--ink2);}
+.pager .pg.on{background:var(--fill2); color:var(--ink); border-color:var(--ink4);}
+
+.hero{padding:18px 20px; display:flex; align-items:flex-start; gap:16px;}
+.hero h2{font-size:18px; font-weight:600; letter-spacing:.2px;}
+.hero .sub{margin-top:6px; display:flex; gap:20px; flex-wrap:wrap; color:var(--ink2); font-size:12.5px;}
+.hero .sub span b{font-weight:500; color:var(--ink); margin-left:4px;}
+.hero-actions{margin-left:auto; display:flex; gap:8px;}
+
+.section{margin-top:16px;}
+.sec-head{display:flex; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid var(--line);}
+.sec-head h3{font-size:14px; font-weight:600; display:flex; align-items:center; gap:8px;}
+.sec-head .hint{font-size:11.5px; color:var(--ink3); font-weight:400;}
+
+.stats{display:flex; gap:0; padding:0;}
+.stat{flex:1; padding:16px 20px; border-right:1px solid var(--line);}
+.stat:last-child{border-right:none;}
+.stat .k{font-size:11.5px; color:var(--ink3);}
+.stat .v{font-size:22px; font-weight:600; margin-top:4px; font-variant-numeric:tabular-nums;}
+.stat .v small{font-size:12px; font-weight:400; color:var(--ink3); margin-left:4px;}
+
+.empty{padding:40px 20px; text-align:center; color:var(--ink3); font-size:12.5px;}
+.empty .box{width:52px; height:40px; border:1.5px dashed var(--line2); border-radius:6px; margin:0 auto 12px;}
+
+.mask{
+  position:fixed; inset:44px 0 0 232px; background:rgba(0,0,0,.32);
+  display:flex; align-items:flex-start; justify-content:center; padding-top:64px; z-index:150;
+}
+.modal{width:620px; background:#fff; border-radius:8px; border:1px solid var(--line2); overflow:hidden;}
+.modal-head{padding:16px 20px; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between;}
+.modal-head h3{font-size:15px; font-weight:600;}
+.modal-head .x{color:var(--ink3); font-size:16px;}
+.modal-body{padding:18px 20px; max-height:520px; overflow:auto;}
+.modal-foot{padding:12px 20px; border-top:1px solid var(--line); display:flex; justify-content:flex-end; gap:8px; background:var(--fill);}
+
+.field{margin-bottom:14px;}
+.field label{display:block; font-size:12.5px; color:var(--ink2); margin-bottom:6px;}
+.field label .req{color:var(--ink); margin-right:2px;}
+.input{
+  height:34px; border:1px solid var(--line2); border-radius:4px; display:flex; align-items:center;
+  padding:0 10px; font-size:13px; color:var(--ink); background:#fff;
+}
+.input.focus{border-color:var(--ink); box-shadow:0 0 0 2px rgba(0,0,0,.06);}
+.input .ph{color:var(--ink4);}
+.row2{display:grid; grid-template-columns:1fr 1fr; gap:12px;}
+
+.similar{border-radius:6px; background:#f5f5f5; padding:12px; margin-bottom:16px;}
+.similar .title{font-size:12.5px; color:var(--ink2); display:flex; align-items:center; gap:6px; margin-bottom:10px;}
+.similar .title b{color:var(--ink); font-weight:600;}
+.sim-item{
+  display:flex; align-items:center; gap:12px; padding:10px; background:#fff;
+  border:1px solid var(--line); border-radius:5px; margin-bottom:8px;
+}
+.sim-item:last-child{margin-bottom:0;}
+.sim-item .info{flex:1; min-width:0;}
+.sim-item .n{font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.sim-item .m{font-size:11.5px; color:var(--ink3); margin-top:3px; display:flex; gap:12px; flex-wrap:wrap;}
+
+.banner{
+  display:flex; align-items:center; gap:10px; padding:10px 14px; border:1px solid var(--line2);
+  border-radius:6px; background:var(--fill); font-size:12.5px; color:var(--ink2); margin-bottom:14px;
+}
+.banner b{color:var(--ink); font-weight:600;}
+
+.notes{
+  margin-top:18px; border:1px dashed var(--line2); border-radius:8px; background:#fbfbfb;
+  padding:14px 18px; font-size:12.5px; color:var(--ink2);
+}
+.notes h4{font-size:12px; font-weight:600; color:var(--ink); margin-bottom:8px; letter-spacing:.3px;}
+.notes ul{padding-left:16px;}
+.notes li{margin:5px 0; line-height:1.6;}
+.notes code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:11.5px; background:var(--fill2); padding:1px 4px; border-radius:3px;}
+
+.view{display:none;}
+.view.on{display:block;}
+.tagline{font-size:11.5px; color:var(--ink3); margin-left:6px; font-weight:400;}
+.na{color:var(--ink3);}
+</style>
+</head>
+<body>
+
+<div class="docbar">
+  <b>线框稿 · 项目管理与合同台账</b>
+  <div class="tabs">
+    <button class="on" data-view="v1">1 项目列表</button>
+    <button data-view="v2">2 新建项目（查重）</button>
+    <button data-view="v3">3 项目详情</button>
+    <button data-view="v4">4 子项目页头</button>
+    <button data-view="v5">5 合同台账</button>
+  </div>
+  <div class="meta">1440 × 900 · 灰阶低保真 · 沿用现有 shell 骨架</div>
+</div>
+
+<div class="app">
+  <aside class="side">
+    <div class="brand"><span class="mark"></span>档案归档</div>
+    <div class="nav">
+      <div class="item"><span class="dot"></span>工作台</div>
+      <div class="group">业务</div>
+      <div class="item on"><span class="dot"></span>项目<span class="tag-new">新</span></div>
+      <div class="item"><span class="dot"></span>归档<span class="count">128</span></div>
+      <div class="group">管理</div>
+      <div class="item"><span class="dot"></span>合同台账<span class="count">1037</span></div>
+      <div class="item"><span class="dot"></span>归档记录</div>
+      <div class="item"><span class="dot"></span>用户管理</div>
+    </div>
+    <div class="sidefoot">
+      <div class="avatar">陈</div>
+      <div><div class="who">陈立</div><div class="role">管理员</div></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="top">
+      <div class="crumb" id="crumb"><b>项目</b></div>
+      <div class="top-right" id="topActions">
+        <div class="searchbox">搜索项目名称、编号、建设单位</div>
+        <button class="btn primary">+ 新建项目</button>
+      </div>
+    </div>
+    <div class="content">
+
+      <!-- 1 项目列表 -->
+      <section class="view on" id="v1">
+        <div class="banner">
+          <span>有 <b>3 个子项目</b>尚未归属任何项目，归档后不会计入项目统计。</span>
+          <button class="btn sm" style="margin-left:auto">去处理</button>
+        </div>
+        <div class="filters">
+          <div class="f">状态：全部<span class="caret">▾</span></div>
+          <div class="f">年份：全部<span class="caret">▾</span></div>
+          <div class="f">地区：全部<span class="caret">▾</span></div>
+          <div class="f">负责人：全部<span class="caret">▾</span></div>
+          <div class="f">服务类型：全部<span class="caret">▾</span></div>
+          <div style="margin-left:auto;color:var(--ink3);font-size:12.5px;">共 46 个项目</div>
+        </div>
+
+        <div class="card">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:28%">项目名称</th>
+                <th style="width:12%">项目编号</th>
+                <th style="width:21%">建设单位</th>
+                <th style="width:19%">子项目</th>
+                <th style="width:9%">状态</th>
+                <th style="width:7%">负责人</th>
+                <th style="width:10%">更新时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>
+                  <div class="t-main">G8517 屏山至兴义国家高速公路</div>
+                  <div class="t-sub">贵州 · 新建 · 全长 160km</div>
+                </td>
+                <td class="num">G8517-2025-01</td>
+                <td>贵州交通投资集团有限公司</td>
+                <td>
+                  <div class="chips">
+                    <span class="chip">招标 2</span>
+                    <span class="chip">造价 1</span>
+                  </div>
+                </td>
+                <td><span class="chip solid">进行中</span></td>
+                <td>李晓飞</td>
+                <td class="num" style="color:var(--ink3)">10-28</td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="t-main">新疆 S21 阿勒泰至乌鲁木齐公路建设一期</div>
+                  <div class="t-sub">新疆 · 新建 · 全长 342km</div>
+                </td>
+                <td class="num">P2025-002</td>
+                <td>新疆交通投资（集团）有限责任公司</td>
+                <td><div class="chips"><span class="chip">招标 3</span><span class="chip">咨询 1</span></div></td>
+                <td><span class="chip solid">进行中</span></td>
+                <td>张胜</td>
+                <td class="num" style="color:var(--ink3)">10-26</td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="t-main">兰州至海口国家高速重庆至遵义段扩容工程</div>
+                  <div class="t-sub">贵州 · 改扩建 · 全长 118km</div>
+                </td>
+                <td class="num">P2025-003</td>
+                <td>贵州高速公路集团有限公司</td>
+                <td><div class="chips"><span class="chip">造价 2</span></div></td>
+                <td><span class="chip">已关闭</span></td>
+                <td>李光</td>
+                <td class="num" style="color:var(--ink3)">09-30</td>
+              </tr>
+              <tr>
+                <td>
+                  <div class="t-main">荣成至乌海公路山西境灵丘至山阴段</div>
+                  <div class="t-sub">山西 · 新建 · 全长 96km</div>
+                </td>
+                <td class="num">P2024-017</td>
+                <td>大同高速公路建设管理处</td>
+                <td><div class="chips"><span class="chip">招标 1</span><span class="chip">咨询 1</span></div></td>
+                <td><span class="chip solid">进行中</span></td>
+                <td>赵丽娟</td>
+                <td class="num" style="color:var(--ink3)">09-12</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="pager">
+            <span>共 46 条</span>
+            <div class="pg">‹</div><div class="pg on">1</div><div class="pg">2</div><div class="pg">3</div><div class="pg">›</div>
+          </div>
+        </div>
+
+        <div class="notes">
+          <h4>设计要点</h4>
+          <ul>
+            <li>「项目」是新的一级导航，放在业务分组第一位；原「全部项目 / 招标 / 咨询 / 造价」四个入口收成「归档」一项，避免两个"项目"并存。</li>
+            <li>列表不加合同列——合同台账与业务解耦，项目页不出现任何合同数量或金额。</li>
+            <li>「子项目」列用类型计数代替逐条罗列，一眼看出这个项目承接了哪几类服务；未归属的子项目不在这里计数，统一走顶部提示。</li>
+            <li>空项目（无子项目）保留在列表，靠状态和计数自解释，不新增"草稿项目"概念。</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 2 新建项目 -->
+      <section class="view" id="v2">
+        <div class="filters">
+          <div class="f">状态：全部<span class="caret">▾</span></div>
+          <div class="f">年份：全部<span class="caret">▾</span></div>
+          <div class="f">地区：全部<span class="caret">▾</span></div>
+          <div style="margin-left:auto;color:var(--ink3);font-size:12.5px;">共 46 个项目</div>
+        </div>
+        <div class="card">
+          <table>
+            <thead><tr><th style="width:34%">项目名称</th><th style="width:14%">项目编号</th><th style="width:26%">建设单位</th><th style="width:14%">子项目</th><th>更新时间</th></tr></thead>
+            <tbody>
+              <tr><td><div class="t-main">G8517 屏山至兴义国家高速公路</div><div class="t-sub">贵州 · 新建</div></td><td class="num">G8517-2025-01</td><td>贵州交通投资集团有限公司</td><td><div class="chips"><span class="chip">招标 2</span></div></td><td class="na">10-28</td></tr>
+              <tr><td><div class="t-main">新疆 S21 阿勒泰至乌鲁木齐公路建设一期</div></td><td class="num">P2025-002</td><td>新疆交通投资（集团）有限责任公司</td><td><div class="chips"><span class="chip">招标 3</span></div></td><td class="na">10-26</td></tr>
+              <tr><td><div class="t-main">兰州至海口国家高速重庆至遵义段扩容工程</div></td><td class="num">P2025-003</td><td>贵州高速公路集团有限公司</td><td><div class="chips"><span class="chip">造价 2</span></div></td><td class="na">09-30</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="mask">
+          <div class="modal">
+            <div class="modal-head">
+              <h3>新建项目</h3>
+              <span class="x">✕</span>
+            </div>
+            <div class="modal-body">
+              <div class="field">
+                <label><span class="req">*</span>项目名称</label>
+                <div class="input focus">屏山至兴义高速公路</div>
+              </div>
+
+              <div class="similar">
+                <div class="title">系统内已有 <b>2 个</b>相似项目</div>
+                <div class="sim-item">
+                  <div class="info">
+                    <div class="n">G8517 屏山至兴义国家高速公路</div>
+                    <div class="m"><span>编号 G8517-2025-01</span><span>贵州交通投资集团有限公司</span><span>子项目 3</span><span>创建于 2025-03-12</span></div>
+                  </div>
+                  <button class="btn sm">用这个项目</button>
+                </div>
+                <div class="sim-item">
+                  <div class="info">
+                    <div class="n">屏山至兴义高速公路（贵州境）勘察设计</div>
+                    <div class="m"><span>编号 P2024-009</span><span>贵州高速公路集团有限公司</span><span>子项目 1</span><span>创建于 2024-11-06</span></div>
+                  </div>
+                  <button class="btn sm">用这个项目</button>
+                </div>
+              </div>
+
+              <div class="row2">
+                <div class="field">
+                  <label>建设单位</label>
+                  <div class="input"><span class="ph">选填</span></div>
+                </div>
+                <div class="field">
+                  <label>项目编号</label>
+                  <div class="input"><span class="ph">留空自动生成 P2026-0xx</span></div>
+                </div>
+              </div>
+              <div class="row2">
+                <div class="field">
+                  <label>所在地区</label>
+                  <div class="input"><span class="ph">省份</span></div>
+                </div>
+                <div class="field">
+                  <label>项目总投资（万元）</label>
+                  <div class="input"><span class="ph">选填</span></div>
+                </div>
+              </div>
+              <div class="field" style="margin-bottom:0">
+                <label>公司负责人</label>
+                <div class="input"><span class="ph">选填，默认当前账号</span></div>
+              </div>
+            </div>
+            <div class="modal-foot">
+              <button class="btn">取消</button>
+              <button class="btn primary">仍然新建</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="notes">
+          <h4>设计要点</h4>
+          <ul>
+            <li>查重结果放在名称输入框正下方，不弹二次确认框——用户正在填表，打断式弹窗会被无脑点掉。</li>
+            <li>相似条目给的要件是"能不能认出来是同一个"：名称、编号、建设单位、已有子项目数、创建时间；不放合同信息。</li>
+            <li>主按钮仍是「仍然新建」，不改成「返回修改」——同名跨年度是真实业务，硬拦会逼用户改个假名字绕过去。</li>
+            <li>「用这个项目」跳转到已有项目详情，后续直接在里面加子项目，比新建后合并省事。</li>
+            <li>输入停顿 300ms 触发查重，不要求点"检查"按钮。</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 3 项目详情 -->
+      <section class="view" id="v3">
+        <div class="card">
+          <div class="hero">
+            <div>
+              <h2>G8517 屏山至兴义国家高速公路</h2>
+              <div class="sub">
+                <span>编号<b>G8517-2025-01</b></span>
+                <span>建设单位<b>贵州交通投资集团有限公司</b></span>
+                <span>地区<b>贵州</b></span>
+                <span>总投资<b>498.6 亿元</b></span>
+                <span>负责人<b>李晓飞</b></span>
+                <span>状态<b>进行中</b></span>
+              </div>
+            </div>
+            <div class="hero-actions">
+              <button class="btn">编辑</button>
+              <button class="btn primary">+ 添加子项目</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card section">
+          <div class="sec-head">
+            <h3>子项目 <span class="hint">一个服务合同对应一个子项目，各自独立归档</span></h3>
+            <span class="hint">共 3 个</span>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th style="width:12%">服务类型</th>
+                <th style="width:30%">子项目名称</th>
+                <th style="width:14%">子项目编号</th>
+                <th style="width:12%">归档状态</th>
+                <th style="width:10%">负责人</th>
+                <th style="width:10%">更新时间</th>
+                <th style="width:12%">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><span class="chip solid">招标代理</span></td>
+                <td><div class="t-main">施工监理招标</div><div class="t-sub">公开招标 · 2 个标段</div></td>
+                <td class="num">ZEC-Z25F-011</td>
+                <td><span class="chip solid">已归档</span></td>
+                <td>李晓飞</td>
+                <td class="num" style="color:var(--ink3)">10-24</td>
+                <td><button class="btn link">进入归档</button></td>
+              </tr>
+              <tr>
+                <td><span class="chip solid">造价咨询</span></td>
+                <td><div class="t-main">工程量清单编制</div><div class="t-sub">含限价编制</div></td>
+                <td class="num">ZEC-Z25F-012</td>
+                <td><span class="chip">待审核</span></td>
+                <td>张胜</td>
+                <td class="num" style="color:var(--ink3)">10-28</td>
+                <td><button class="btn link">进入归档</button></td>
+              </tr>
+              <tr>
+                <td><span class="chip solid">咨询</span></td>
+                <td><div class="t-main">PPP 实施方案编制</div><div class="t-sub">待补履约评价</div></td>
+                <td class="num">ZEC-Z25F-013</td>
+                <td><span class="chip">草稿</span></td>
+                <td>赵丽娟</td>
+                <td class="num" style="color:var(--ink3)">10-29</td>
+                <td><button class="btn link">进入归档</button></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="card section">
+          <div class="sec-head"><h3>归档进度</h3><span class="hint">按子项目汇总，纸质档单独计</span></div>
+          <div class="stats">
+            <div class="stat"><div class="k">子项目</div><div class="v">3<small>个</small></div></div>
+            <div class="stat"><div class="k">草稿</div><div class="v">1</div></div>
+            <div class="stat"><div class="k">待审核</div><div class="v">1</div></div>
+            <div class="stat"><div class="k">已归档</div><div class="v">1</div></div>
+            <div class="stat"><div class="k">纸质档待核对</div><div class="v">0</div></div>
+          </div>
+        </div>
+
+        <div class="notes">
+          <h4>设计要点</h4>
+          <ul>
+            <li>页头只有项目本身的事实，不放合同数、合同额——这两个数在合同台账里，不在业务页。</li>
+            <li>子项目表按"服务类型 + 归档状态"两列就能扫完，不需要展开；「进入归档」直接进原有归档流程，流程零改动。</li>
+            <li>未归属的子项目不塞进任何一个项目的详情，改在项目列表顶部提示并给「去处理」入口，避免把不属于此项目的档案混进来。</li>
+            <li>归档进度用计数不用百分比：3 个子项目里算 33% 没有意义，数个数更准。</li>
+            <li>「添加子项目」全页只出现一次，放在页头作为主动作；区块头只显示计数，不做重复入口。</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 4 子项目页头 -->
+      <section class="view" id="v4">
+        <div class="banner">
+          <span>该子项目尚未归属任何项目，归档完成后不会出现在项目详情里。</span>
+          <button class="btn sm" style="margin-left:auto">归入项目</button>
+        </div>
+
+        <div class="card" style="padding:18px 20px;">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span style="font-size:18px;font-weight:600;">施工监理招标</span>
+            <span class="chip solid">招标代理</span>
+            <span class="chip solid">已归档</span>
+            <span style="color:var(--ink3);font-size:12.5px;">ZEC-Z25F-011 · 2 个标段 · 更新于 10-24</span>
+            <div style="margin-left:auto;display:flex;gap:8px;">
+              <button class="btn">下载目录</button>
+              <button class="btn">编辑信息</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card section" style="padding:0;">
+          <div class="sec-head"><h3>归档文件</h3><span class="hint">沿用现有归档表单与审核流程，本次不改动</span></div>
+          <table>
+            <thead><tr><th style="width:26%">文档类型</th><th style="width:30%">文件名</th><th style="width:16%">提取状态</th><th>更新时间</th></tr></thead>
+            <tbody>
+              <tr><td>招标文件</td><td>G8517施工监理招标文件.md</td><td><span class="chip solid">已提取</span></td><td class="num na">10-20</td></tr>
+              <tr><td>中标通知书</td><td>中标通知书-标段1.md</td><td><span class="chip solid">已提取</span></td><td class="num na">10-22</td></tr>
+              <tr><td>履约评价</td><td class="na">未上传</td><td><span class="chip dash">待上传</span></td><td class="na">—</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="notes">
+          <h4>设计要点</h4>
+          <ul>
+            <li>子项目页面只加两样东西：面包屑回到项目、页头显示服务类型标签。归档表单、审核、下载一律不动。</li>
+            <li>未归属时顶部出现一条提示 + 「归入项目」，不做强制拦截——先归档后补归属是允许的。</li>
+            <li>已归属时面包屑三级「项目 / 项目名 / 子项目名」，中间可点回；未归属时只有两级，并在末尾标「未归属」，不给假路径。</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 5 合同台账 -->
+      <section class="view" id="v5">
+        <div class="filters">
+          <div class="f wide">搜索合同名称、对方单位</div>
+          <div class="f">合同性质：全部<span class="caret">▾</span></div>
+          <div class="f">付款类：全部<span class="caret">▾</span></div>
+          <div class="f">年度：全部<span class="caret">▾</span></div>
+          <div style="margin-left:auto;display:flex;gap:8px;">
+            <button class="btn">导入 Excel</button>
+            <button class="btn primary">+ 新增合同</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:5%">序号</th>
+                <th style="width:32%">合同名称</th>
+                <th style="width:18%">对方单位</th>
+                <th style="width:10%">合同性质</th>
+                <th style="width:9%" class="right">应贴花</th>
+                <th style="width:9%" class="right">已贴花</th>
+                <th style="width:6%" class="right">份数</th>
+                <th style="width:11%">归档日期</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="num na">1</td>
+                <td><div class="t-main">太原至佳县高速公路（东段）施工招标项目技术咨询服务合同（购车）</div><div class="t-sub">历史导入</div></td>
+                <td>太原市华宝通工程监理有限公司</td>
+                <td><span class="chip">咨询</span></td>
+                <td class="num right">2009</td>
+                <td class="num right">330</td>
+                <td class="num right">1</td>
+                <td class="num na">2009-04-23</td>
+              </tr>
+              <tr>
+                <td class="num na">2</td>
+                <td><div class="t-main">高唐至邢台公路高唐至临清等四条公路工程施工招标固化工程量清单编制委托合同</div><div class="t-sub">历史导入</div></td>
+                <td>—</td>
+                <td><span class="chip">造价咨询</span></td>
+                <td class="num right">2009</td>
+                <td class="num right">45</td>
+                <td class="num right">1</td>
+                <td class="num na">2009-09-28</td>
+              </tr>
+              <tr>
+                <td class="num na">3</td>
+                <td><div class="t-main">贵州省都匀至安顺公路房建工程装饰装修设计施工总承包招标造价咨询合同文件（付）</div><div class="t-sub">付款类</div></td>
+                <td>贵州富通工程咨询有限公司</td>
+                <td><span class="chip">造价咨询</span></td>
+                <td class="num right">—</td>
+                <td class="num right">23.48</td>
+                <td class="num right">1</td>
+                <td class="num na">—</td>
+              </tr>
+              <tr>
+                <td class="num na">4</td>
+                <td><div class="t-main">国家高速公路网荣成至乌海公路山西境灵丘至山阴高速公路项目招标代理合同</div><div class="t-sub">历史导入</div></td>
+                <td>大同高速公路建设管理处</td>
+                <td><span class="chip">招标代理</span></td>
+                <td class="num right">—</td>
+                <td class="num right">—</td>
+                <td class="num right">—</td>
+                <td class="num na">—</td>
+              </tr>
+            </tbody>
+          </table>
+          <div class="pager">
+            <span>共 1037 条</span>
+            <div class="pg">‹</div><div class="pg on">1</div><div class="pg">2</div><div class="pg">3</div><div class="pg">…</div><div class="pg">21</div><div class="pg">›</div>
+          </div>
+        </div>
+
+        <div class="notes">
+          <h4>设计要点</h4>
+          <ul>
+            <li>标题后跟一行「印花税台账 · 管理员维护」，说明它是什么、谁维护，避免业务人员拿它当项目合同查；顶栏不放项目相关操作。</li>
+            <li>整页没有任何"所属项目""关联项目"字段或入口——解耦要解干净，留一个空列就会有人追问为什么填不了。</li>
+            <li>「历史导入」作为行内小字标注来源，让管理员知道这批数据来自 2012 年贴花表，不参与后续业务。</li>
+            <li>导航中「合同台账」仅管理员可见；普通账号不显示该项，直接访问返回 403，本稿展示的是管理员视角。</li>
+            <li>字段顺序按财务使用习惯：应贴花、已贴花挨着放，金额右对齐，方便竖着扫。</li>
+          </ul>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<script>
+(function(){
+  var btns = document.querySelectorAll('.docbar .tabs button');
+  var views = document.querySelectorAll('.view');
+  var crumb = document.getElementById('crumb');
+  var titles = {
+    v1: '<b>项目</b>',
+    v2: '<b>项目</b>',
+    v3: '<span>项目</span><span class="sep">/</span><b>G8517 屏山至兴义国家高速公路</b>',
+    v4: '<span>项目</span><span class="sep">/</span><b>施工监理招标</b><span class="tagline">未归属</span>',
+    v5: '<b>合同台账</b><span class="tagline">印花税台账 · 管理员维护</span>'
+  };
+  btns.forEach(function(b){
+    b.addEventListener('click', function(){
+      btns.forEach(function(x){x.classList.remove('on');});
+      b.classList.add('on');
+      views.forEach(function(v){v.classList.remove('on');});
+      var id = b.dataset.view;
+      document.getElementById(id).classList.add('on');
+      crumb.innerHTML = titles[id];
+      document.getElementById('topActions').style.display =
+        (id === 'v1' || id === 'v2') ? 'flex' : 'none';
+      window.scrollTo(0,0);
+    });
+  });
+})();
+</script>
+</body>
+</html>

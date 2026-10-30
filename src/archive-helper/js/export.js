@@ -134,8 +134,8 @@ const date = dayjs().format('YYYYMMDD');
       '序号', '合同名称', '对方企业名称', '合同性质', '合同内容',
       '项目负责人', '技术负责人', '合同日期', '代理费金额（万元）',
       '应贴花金额（元）', '已贴花金额（元）', '份数', '存档日期',
-      '汇总纳税', '统一社会信用代码', '大合同', '付款类',
-      '所属大合同', '子合同数', '关联项目数', '关联项目',
+      '汇总纳税', '统一社会信用代码', '付款类',
+      '所属合同', '子合同数',
       '合同金额（万元）', '来源'
     ];
 
@@ -155,12 +155,9 @@ const date = dayjs().format('YYYYMMDD');
       c.archiveDate || '',
       c.isConsolidatedTax ? '是' : '否',
       c.creditCodeRaw || '',
-      c.isAnchor ? '是' : '否',
       c.isPayment ? '是' : '否',
       c.parentContractId || '',
       c.childCount || 0,
-      c.projectCount || 0,
-      (c.projectNames || []).join('、'),
       c.contractAmount == null ? '' : c.contractAmount,
       c.source === 'legacy' ? '历史导入' : '手工新增'
     ]);

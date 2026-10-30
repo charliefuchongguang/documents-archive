@@ -78,6 +78,7 @@ function ensureSearchIndexTables(db) {
       road_level TEXT DEFAULT '',
       project_manager TEXT DEFAULT '',
       tech_manager TEXT DEFAULT '',
+      master_project_id TEXT,
       entrust_date TEXT,
       entrust_date_end TEXT,
       total_investment REAL,
@@ -101,6 +102,10 @@ function ensureSearchIndexTables(db) {
       database.exec('ALTER TABLE project_search_index ADD COLUMN entrust_date_end TEXT');
       database.exec('UPDATE project_search_index SET entrust_date_end = entrust_date WHERE entrust_date_end IS NULL');
     }
+    if (!columns.some((col) => col.name === 'master_project_id')) {
+      database.exec('ALTER TABLE project_search_index ADD COLUMN master_project_id TEXT');
+    }
+    database.exec('CREATE INDEX IF NOT EXISTS idx_psi_master ON project_search_index(master_project_id)');
     database.exec('CREATE INDEX IF NOT EXISTS idx_psi_seg_win_date ON project_search_segment(win_notice_date)');
     database.exec('CREATE INDEX IF NOT EXISTS idx_psi_seg_win_amount ON project_search_segment(win_amount)');
   } catch (e) { /* 忽略 */ }
@@ -121,11 +126,13 @@ function writeProjectSearchIndex(database, projectId, formData, segmentFormData)
 
   database.prepare('DELETE FROM project_search_segment WHERE project_id = ?').run(projectId);
 
+  const projectRow = database.prepare('SELECT master_project_id FROM projects WHERE id = ?').get(projectId);
+
   database.prepare(`
     INSERT INTO project_search_index (
       project_id, project_overview, tender_type, project_type, industry, road_level,
-      project_manager, tech_manager, entrust_date, entrust_date_end, total_investment, mileage_km, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      project_manager, tech_manager, master_project_id, entrust_date, entrust_date_end, total_investment, mileage_km, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     ON CONFLICT(project_id) DO UPDATE SET
       project_overview = excluded.project_overview,
       tender_type = excluded.tender_type,
@@ -134,6 +141,7 @@ function writeProjectSearchIndex(database, projectId, formData, segmentFormData)
       road_level = excluded.road_level,
       project_manager = excluded.project_manager,
       tech_manager = excluded.tech_manager,
+      master_project_id = excluded.master_project_id,
       entrust_date = excluded.entrust_date,
       entrust_date_end = excluded.entrust_date_end,
       total_investment = excluded.total_investment,
@@ -148,6 +156,7 @@ function writeProjectSearchIndex(database, projectId, formData, segmentFormData)
     strVal(fd.roadLevel),
     strVal(fd.projectManager),
     strVal(fd.techManager),
+    projectRow?.master_project_id || null,
     entrustStart,
     entrustEnd,
     parseNumber(fd.totalInvestment),

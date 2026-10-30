@@ -124,6 +124,16 @@ window.Http = {
   },
 
   /**
+   * PATCH 请求
+   */
+  async patch(path, data) {
+    return this.request(path, {
+      method: 'PATCH',
+      body: JSON.stringify(data)
+    });
+  },
+
+  /**
    * DELETE 请求
    */
   async del(path) {
