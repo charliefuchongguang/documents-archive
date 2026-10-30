@@ -33,6 +33,9 @@ function initDatabase() {
 
     // 建表 SQL
     const createTables = `
+      -- projects = 归档项目（业务主对象）：本公司承接的一个服务包的归档单元
+      -- master_projects = 工程项目（辅助分组）：业主的立项工程，仅用于把归档项目归堆
+      -- 注意：表名里的 master 是“上一级”而非“更重要”，业务主对象始终是 projects。
       CREATE TABLE IF NOT EXISTS projects (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -141,6 +144,33 @@ function initDatabase() {
         PRIMARY KEY (year)
       );
 
+      -- 工程项目：业主的立项工程，只承担“归档项目分组”职责，不是本公司承接的业务对象
+      CREATE TABLE IF NOT EXISTS master_projects (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        project_no TEXT DEFAULT '',
+        owner_name TEXT DEFAULT '',
+        owner_credit_code TEXT DEFAULT '',
+        region TEXT DEFAULT '',
+        industry TEXT DEFAULT '公路',
+        total_investment REAL,
+        construction_scale TEXT DEFAULT '',
+        manager TEXT DEFAULT '',
+        status TEXT DEFAULT 'active',
+        remark TEXT DEFAULT '',
+        created_by TEXT,
+        created_by_name TEXT DEFAULT '',
+        created_at TEXT DEFAULT (datetime('now')),
+        updated_at TEXT DEFAULT (datetime('now'))
+      );
+
+      -- 工程项目编号序列（与归档项目编号序列分开，避免混号）
+      CREATE TABLE IF NOT EXISTS master_project_no_seq (
+        year TEXT NOT NULL,
+        current_seq INTEGER DEFAULT 0,
+        PRIMARY KEY (year)
+      );
+
       CREATE TABLE IF NOT EXISTS mineru_tasks (
         id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
@@ -229,6 +259,9 @@ function initDatabase() {
       'ALTER TABLE projects ADD COLUMN paper_review_comment TEXT DEFAULT \'\'',
       'ALTER TABLE projects ADD COLUMN archive_template TEXT DEFAULT \'\'',
       'ALTER TABLE projects ADD COLUMN project_no TEXT DEFAULT \'\'',
+      'ALTER TABLE projects ADD COLUMN master_project_id TEXT',
+      'ALTER TABLE projects ADD COLUMN seq_in_project INTEGER',
+      'ALTER TABLE projects ADD COLUMN owner_name_snapshot TEXT DEFAULT \'\'',
       'ALTER TABLE merged_data ADD COLUMN segment_form_data TEXT',
       'ALTER TABLE files ADD COLUMN has_paper INTEGER NOT NULL DEFAULT 0',
       'ALTER TABLE files ADD COLUMN paper_reviewed INTEGER NOT NULL DEFAULT 0',
@@ -243,9 +276,15 @@ function initDatabase() {
       // 手机号唯一（允许多个 NULL）
       db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users(phone)');
     } catch (e) { /* 忽略 */ }
-    // 同分类下项目名称唯一（若历史已有同名冲突则建索引失败，仍靠接口查重）
+    // 归档项目不做同名查重（同一工程下分年度/分标段同名是真实业务）
     try {
-      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_projects_category_name ON projects(category_id, name)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_projects_master ON projects(master_project_id)');
+    } catch (e) { /* 忽略 */ }
+    try {
+      db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_master_projects_no ON master_projects(project_no) WHERE project_no <> \'\'');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_master_projects_name ON master_projects(name)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_master_projects_owner ON master_projects(owner_name)');
+      db.exec('CREATE INDEX IF NOT EXISTS idx_master_projects_status ON master_projects(status)');
     } catch (e) { /* 忽略 */ }
     try {
       db.exec('CREATE INDEX IF NOT EXISTS idx_psi_seg_win_date ON project_search_segment(win_notice_date)');
@@ -266,6 +305,9 @@ function initDatabase() {
 
     // 项目业务分类（招标/咨询/造价）种子与旧数据回填
     migrateProjectCategoryData(db);
+
+    // 服务类型展示名对齐线框：招标代理 / 造价咨询 / 咨询（code 与 NAS 目录不变）
+    migrateProjectCategoryNaming(db);
 
     // 查询辅助表：确保存在并全量回填（可重复执行）
     migrateProjectSearchIndex(db);
@@ -428,6 +470,27 @@ function migrateProjectCreatorData(db) {
   try {
     db.exec('CREATE INDEX IF NOT EXISTS idx_projects_created_by ON projects(created_by)');
   } catch (e) { /* 忽略 */ }
+}
+
+/**
+ * 服务类型展示名对齐：招标代理 / 造价咨询 / 咨询
+ * 只改 name 与 sort_order，code 与 nas_folder 保持不变，避免影响 NAS 归档路径
+ * @param {import('better-sqlite3').Database} db
+ */
+function migrateProjectCategoryNaming(db) {
+  const seeds = [
+    { id: 'cat_tender', name: '招标代理', sortOrder: 1 },
+    { id: 'cat_cost', name: '造价咨询', sortOrder: 2 },
+    { id: 'cat_consult', name: '咨询', sortOrder: 3 }
+  ];
+  const stmt = db.prepare(`
+    UPDATE project_categories
+    SET name = ?, sort_order = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `);
+  for (const seed of seeds) {
+    try { stmt.run(seed.name, seed.sortOrder, seed.id); } catch (e) { /* 忽略 */ }
+  }
 }
 
 /**

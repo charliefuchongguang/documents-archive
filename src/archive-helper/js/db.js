@@ -51,6 +51,12 @@ function _mapProject(p) {
     paperReviewComment: p.paper_review_comment || p.paperReviewComment || '',
     archiveTemplate: p.archive_template || p.archiveTemplate || '',
     projectNo: p.project_no || p.projectNo || '',
+    masterProjectId: p.master_project_id || p.masterProjectId || '',
+    masterProjectName: p.master_project_name || p.masterProjectName || '',
+    masterProjectNo: p.master_project_no || p.masterProjectNo || '',
+    masterProjectOwnerName: p.master_project_owner_name || p.masterProjectOwnerName || '',
+    ownerNameSnapshot: p.owner_name_snapshot || p.ownerNameSnapshot || '',
+    seqInProject: p.seq_in_project != null ? Number(p.seq_in_project) : null,
     paperTotal: Number(p.paper_total != null ? p.paper_total : (p.paperTotal != null ? p.paperTotal : 0)) || 0,
     paperConfirmed: Number(p.paper_confirmed != null ? p.paper_confirmed : (p.paperConfirmed != null ? p.paperConfirmed : 0)) || 0,
   };
@@ -91,7 +97,7 @@ window.DB = {
    * 创建新项目
    * @param {string} name - 项目名称
    * @param {string} [categoryCode='tender'] - 业务分类 code：tender | consult | cost
-   * @param {{ region?: string, procurementType?: string }} [options]
+   * @param {{ region?: string, procurementType?: string, masterProjectId?: string }} [options]
    * @returns {Promise<string>} 创建的项目ID
    */
   async createProject(name, categoryCode = 'tender', options = {}) {
@@ -99,7 +105,8 @@ window.DB = {
       name,
       categoryCode,
       region: options.region || '',
-      procurementType: options.procurementType || 'G'
+      procurementType: options.procurementType || 'G',
+      masterProjectId: options.masterProjectId || ''
     };
     const project = await Http.post('/projects', body);
     return _mapProject(project).projectId;
@@ -139,7 +146,10 @@ window.DB = {
     amountMin = '',
     amountMax = '',
     mileageMin = '',
-    mileageMax = ''
+    mileageMax = '',
+    masterProjectId = '',
+    years = [],
+    ownerNames = []
   } = {}) {
     const params = new URLSearchParams();
     params.set('page', String(page));
@@ -154,6 +164,13 @@ window.DB = {
     if (amountMax !== '' && amountMax != null) params.set('amountMax', String(amountMax));
     if (mileageMin !== '' && mileageMin != null) params.set('mileageMin', String(mileageMin));
     if (mileageMax !== '' && mileageMax != null) params.set('mileageMax', String(mileageMax));
+    if (masterProjectId) params.set('masterProjectId', String(masterProjectId));
+    for (const y of years) {
+      if (y) params.append('year', y);
+    }
+    for (const o of ownerNames) {
+      if (o) params.append('owner', o);
+    }
     for (const code of categoryCodes) {
       if (code) params.append('categoryCode', code);
     }
@@ -184,6 +201,7 @@ window.DB = {
       sortOrder: d.sortOrder != null ? Number(d.sortOrder) : 0
     }));
     const stats = result.stats || {};
+    const categoryCounts = result.categoryCounts || {};
     return {
       projects: items.map(_mapProject),
       departments,
@@ -194,6 +212,13 @@ window.DB = {
         pendingPaper: Number(stats.pendingPaper) || 0,
         archived: Number(stats.archived) || 0
       },
+      categoryCounts: {
+        all: Number(categoryCounts.all) || 0,
+        tender: Number(categoryCounts.tender) || 0,
+        cost: Number(categoryCounts.cost) || 0,
+        consult: Number(categoryCounts.consult) || 0
+      },
+      unassignedCount: Number(result.unassignedCount) || 0,
       total: Number(result.total) || 0,
       page: Number(result.page) || page,
       pageSize: Number(result.pageSize) || pageSize
@@ -261,6 +286,18 @@ window.DB = {
       departmentId: data.departmentId,
       ownerUserId: data.ownerUserId
     });
+    return _mapProject(result);
+  },
+
+  /**
+   * 修改归档项目的工程归属（创建人/管理员）
+   * @param {string} projectId
+   * @param {string|null} masterProjectId
+   * @param {string} [ownerNameSnapshot]
+   * @returns {Promise<Object>}
+   */
+  async changeProjectMasterProject(projectId, masterProjectId, ownerNameSnapshot = '') {
+    const result = await API.updateProjectMasterProject(projectId, masterProjectId, ownerNameSnapshot);
     return _mapProject(result);
   },
 

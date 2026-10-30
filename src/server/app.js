@@ -21,6 +21,7 @@ const fileRoutes = require('./routes/files');
 const extractRoutes = require('./routes/extract');
 const submitRoutes = require('./routes/submit');
 const contractRoutes = require('./routes/contracts');
+const masterProjectRoutes = require('./routes/masterProjects');
 const { deptRouter, roleRouter, userRouter } = require('./routes/userMgmt');
 
 // 创建 Express 实例
@@ -52,6 +53,7 @@ app.use('/api/files', fileRoutes);
 app.use('/api/extract', extractRoutes);
 app.use('/api/submit', submitRoutes);
 app.use('/api/contracts', contractRoutes);
+app.use('/api/master-projects', masterProjectRoutes);
 app.use('/api/departments', deptRouter);
 app.use('/api/roles', roleRouter);
 app.use('/api/users', userRouter);

@@ -1,7 +1,7 @@
 ﻿/**
  * 合同数据访问对象
- * - contracts：印花税合同台账，大合同作为项目关联锚点
- * - contract_project_links：大合同与项目关联
+ * - contracts：印花税合同台账（管理员维护），与归档项目/工程项目完全解耦
+ * - 不再有合同—项目关联表，不参与任何业务统计
  */
 const crypto = require('crypto');
 const { getDatabase } = require('./init');
@@ -16,7 +16,7 @@ const CONTRACT_COLUMNS = `
   contract_date_raw, contract_date, contract_date_end,
   agency_fee, stamp_tax_due, stamp_tax_paid, copies, archive_date,
   is_consolidated_tax, credit_code_raw, credit_codes, contract_amount,
-  is_anchor, parent_contract_id, is_payment, source,
+  parent_contract_id, is_payment, source,
   legacy_sheet, legacy_row, legacy_extra,
   created_by, created_by_name, created_at, updated_at
 `;
@@ -59,32 +59,13 @@ const CONTRACT_TABLE_SQL = `
   )
 `;
 
-const LINK_TABLE_SQL = `
-  CREATE TABLE IF NOT EXISTS contract_project_links (
-    id TEXT PRIMARY KEY,
-    contract_id TEXT NOT NULL,
-    project_id TEXT NOT NULL,
-    project_name TEXT NOT NULL,
-    created_by TEXT NOT NULL,
-    created_by_name TEXT DEFAULT '',
-    created_at TEXT DEFAULT (datetime('now')),
-    UNIQUE(contract_id, project_id),
-    FOREIGN KEY (contract_id) REFERENCES contracts(id),
-    FOREIGN KEY (project_id) REFERENCES projects(id)
-  )
-`;
-
 const CONTRACT_INDEXES = [
   'CREATE INDEX IF NOT EXISTS idx_contracts_seq_no ON contracts(seq_no)',
   'CREATE INDEX IF NOT EXISTS idx_contracts_name ON contracts(name)',
   'CREATE INDEX IF NOT EXISTS idx_contracts_counterparty ON contracts(counterparty)',
-  'CREATE INDEX IF NOT EXISTS idx_contracts_anchor ON contracts(is_anchor)',
   'CREATE INDEX IF NOT EXISTS idx_contracts_parent ON contracts(parent_contract_id)',
   'CREATE INDEX IF NOT EXISTS idx_contracts_date ON contracts(contract_date)',
-  'CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_legacy ON contracts(legacy_sheet, legacy_row)',
-  'CREATE INDEX IF NOT EXISTS idx_cpl_contract_id ON contract_project_links(contract_id)',
-  'CREATE INDEX IF NOT EXISTS idx_cpl_project_id ON contract_project_links(project_id)',
-  'CREATE INDEX IF NOT EXISTS idx_cpl_project_name ON contract_project_links(project_name)'
+  'CREATE UNIQUE INDEX IF NOT EXISTS idx_contracts_legacy ON contracts(legacy_sheet, legacy_row)'
 ];
 
 const FIELD_TO_COLUMN = {
@@ -106,8 +87,7 @@ const FIELD_TO_COLUMN = {
   isConsolidatedTax: 'is_consolidated_tax',
   creditCodeRaw: 'credit_code_raw',
   creditCodes: 'credit_codes',
-  contractAmount: 'contract_amount',
-  isAnchor: 'is_anchor',
+contractAmount: 'contract_amount',
   parentContractId: 'parent_contract_id',
   isPayment: 'is_payment',
   source: 'source'
@@ -187,8 +167,7 @@ function ensureSchema(db) {
     }
   }
 
-  db.exec(LINK_TABLE_SQL);
-  for (const sql of CONTRACT_INDEXES) {
+for (const sql of CONTRACT_INDEXES) {
     try { db.exec(sql); } catch (e) { /* 忽略 */ }
   }
 }
@@ -222,8 +201,7 @@ function mapContractRow(row) {
     isConsolidatedTax: !!row.is_consolidated_tax,
     creditCodeRaw: row.credit_code_raw || '',
     creditCodes: parseJson(row.credit_codes, []),
-    contractAmount: row.contract_amount,
-    isAnchor: !!row.is_anchor,
+contractAmount: row.contract_amount,
     parentContractId: row.parent_contract_id || null,
     isPayment: !!row.is_payment,
     source: row.source || 'manual',
@@ -234,20 +212,6 @@ function mapContractRow(row) {
     createdByName: row.created_by_name || '',
     createdAt: row.created_at,
     updatedAt: row.updated_at
-  };
-}
-
-function mapLinkRow(row) {
-  if (!row) return null;
-  return {
-    linkId: row.id,
-    contractId: row.contract_id,
-    projectId: row.project_id,
-    projectName: row.project_name,
-    contractName: row.contract_name || undefined,
-    createdBy: row.created_by,
-    createdByName: row.created_by_name || '',
-    createdAt: row.created_at
   };
 }
 
@@ -274,11 +238,6 @@ function getContractByName(name, excludeId = '') {
     ? db.prepare('SELECT * FROM contracts WHERE name = ? AND id != ? ORDER BY seq_no LIMIT 1').get(trimmed, excludeId)
     : db.prepare('SELECT * FROM contracts WHERE name = ? ORDER BY seq_no LIMIT 1').get(trimmed);
   return mapContractRow(row);
-}
-
-function countLinks(db, contractId) {
-  const row = db.prepare('SELECT COUNT(*) AS cnt FROM contract_project_links WHERE contract_id = ?').get(contractId);
-  return Number(row?.cnt) || 0;
 }
 
 function countChildren(db, contractId) {
@@ -329,7 +288,7 @@ function buildPatch(data) {
       patch[column] = normalizeNumber(value);
     } else if (key === 'copies') {
       patch[column] = normalizeInteger(value);
-    } else if (['isConsolidatedTax', 'isAnchor', 'isPayment'].includes(key)) {
+    } else if (['isConsolidatedTax', 'isPayment'].includes(key)) {
       patch[column] = normalizeBoolean(value);
     } else if (key === 'creditCodes') {
       patch[column] = JSON.stringify(Array.isArray(value) ? value : []);
@@ -350,62 +309,13 @@ function validateContractState(db, id, next) {
   if (!next.name || !String(next.name).trim()) {
     throw Object.assign(new Error('合同名称不能为空'), { status: 400 });
   }
-if (next.isPayment && next.isAnchor) {
-    throw Object.assign(new Error('付款类合同不能标记为大合同'), { status: 400 });
-  }
-  if (id && next.isAnchor) {
-    const current = getRawContract(id);
-    if (current && current.parent_contract_id) {
-      throw Object.assign(new Error('子合同不能直接标记为大合同，请先解除所属大合同'), { status: 409 });
-    }
-  }
-  if (next.isPayment && next.parentContractId) {
-    throw Object.assign(new Error('付款类合同不能挂在其他合同下'), { status: 400 });
-  }
-  if (next.parentContractId) {
-    if (next.isAnchor) {
-      throw Object.assign(new Error('大合同不能同时作为子合同'), { status: 400 });
-    }
-    const parent = getRawContract(next.parentContractId);
-    if (!parent) {
-      throw Object.assign(new Error('所属大合同不存在'), { status: 400 });
-    }
-    if (!parent.is_anchor || parent.is_payment) {
-      throw Object.assign(new Error('所属合同必须是大合同且非付款类'), { status: 400 });
-    }
-    if (parent.parent_contract_id) {
-      throw Object.assign(new Error('子合同不能继续挂子合同，仅支持一级挂靠'), { status: 400 });
-    }
-    if (id && parent.id === id) {
-      throw Object.assign(new Error('不能挂到自己'), { status: 400 });
-    }
-    if (id && countChildren(db, id) > 0) {
-      throw Object.assign(new Error('该合同下已有子合同，不能再挂到其他大合同'), { status: 409 });
-    }
-  }
-  if (id && next.isAnchor === 0) {
-    const links = countLinks(db, id);
-    if (links > 0) {
-      throw Object.assign(new Error(`该大合同已关联 ${links} 个项目，请先解除项目关联`), { status: 409 });
-    }
-    const children = countChildren(db, id);
-    if (children > 0) {
-      throw Object.assign(new Error(`该大合同下还有 ${children} 个子合同，请先处理子合同`), { status: 409 });
-    }
-  }
 }
 
 function insertContract(data, source = 'manual') {
   const db = getDb();
   const name = String(data.name || '').trim();
   const patch = buildPatch({ ...data, name });
-  const next = {
-    name,
-    isAnchor: patch.is_anchor !== undefined ? !!patch.is_anchor : false,
-    isPayment: patch.is_payment !== undefined ? !!patch.is_payment : false,
-    parentContractId: patch.parent_contract_id || null
-  };
-  validateContractState(db, null, next);
+  validateContractState(db, null, { name });
 
   const id = data.id || crypto.randomUUID();
   const seqNo = Number.isInteger(Number(data.seqNo)) && Number(data.seqNo) > 0
@@ -434,8 +344,7 @@ function insertContract(data, source = 'manual') {
     is_consolidated_tax: patch.is_consolidated_tax ?? 0,
     credit_code_raw: patch.credit_code_raw || '',
     credit_codes: patch.credit_codes || '[]',
-    contract_amount: patch.contract_amount ?? null,
-    is_anchor: patch.is_anchor ?? 0,
+contract_amount: patch.contract_amount ?? null,
     parent_contract_id: patch.parent_contract_id || null,
     is_payment: patch.is_payment ?? 0,
     source: data.source || source,
@@ -456,8 +365,8 @@ function insertContract(data, source = 'manual') {
       nature_raw, contract_content, project_manager, tech_manager,
       contract_date_raw, contract_date, contract_date_end,
       agency_fee, stamp_tax_due, stamp_tax_paid, copies, archive_date,
-      is_consolidated_tax, credit_code_raw, credit_codes, contract_amount,
-      is_anchor, parent_contract_id, is_payment, source,
+is_consolidated_tax, credit_code_raw, credit_codes, contract_amount,
+      parent_contract_id, is_payment, source,
       legacy_sheet, legacy_row, legacy_extra, created_by, created_by_name, created_at, updated_at
     ) VALUES (
       @id, @seq_no, @name, @counterparty, @total_investment,
@@ -465,7 +374,7 @@ function insertContract(data, source = 'manual') {
       @contract_date_raw, @contract_date, @contract_date_end,
       @agency_fee, @stamp_tax_due, @stamp_tax_paid, @copies, @archive_date,
       @is_consolidated_tax, @credit_code_raw, @credit_codes, @contract_amount,
-      @is_anchor, @parent_contract_id, @is_payment, @source,
+      @parent_contract_id, @is_payment, @source,
       @legacy_sheet, @legacy_row, @legacy_extra, @created_by, @created_by_name, @created_at, @updated_at
     )
   `).run(values);
@@ -490,11 +399,8 @@ function updateContract(id, data) {
     throw Object.assign(new Error('合同名称不能为空'), { status: 400 });
   }
 
-  const next = {
+const next = {
     name: patch.name !== undefined ? patch.name : current.name,
-    isAnchor: data && Object.prototype.hasOwnProperty.call(data, 'isAnchor')
-      ? normalizeBoolean(data.isAnchor)
-      : (current.isAnchor ? 1 : 0),
     isPayment: data && Object.prototype.hasOwnProperty.call(data, 'isPayment')
       ? normalizeBoolean(data.isPayment)
       : (current.isPayment ? 1 : 0),
@@ -521,39 +427,12 @@ function deleteContract(id) {
   if (!existing) {
     throw Object.assign(new Error('合同不存在'), { status: 404 });
   }
-  const links = countLinks(db, id);
-  if (links > 0) {
-    throw Object.assign(new Error(`该合同已关联 ${links} 个项目，不能删除`), { status: 409 });
-  }
   const children = countChildren(db, id);
   if (children > 0) {
     throw Object.assign(new Error(`该合同下还有 ${children} 个子合同，不能删除`), { status: 409 });
   }
-  const transaction = db.transaction(() => {
-    db.prepare('DELETE FROM contract_project_links WHERE contract_id = ?').run(id);
-    db.prepare('DELETE FROM contracts WHERE id = ?').run(id);
-  });
-  transaction();
+  db.prepare('DELETE FROM contracts WHERE id = ?').run(id);
   return { success: true };
-}
-
-function getContractProjectLinks(contractId, currentUserId) {
-  const db = getDb();
-  const rows = db.prepare(`
-    SELECT l.*, c.name AS contract_name
-    FROM contract_project_links l
-    JOIN contracts c ON c.id = l.contract_id
-    WHERE l.contract_id = ?
-    ORDER BY l.created_at ASC
-  `).all(contractId);
-
-  return rows.map((row) => {
-    const mapped = mapLinkRow(row);
-    return {
-      ...mapped,
-      canDelete: !currentUserId || mapped.createdBy === currentUserId
-    };
-  });
 }
 
 function getChildContracts(contractId) {
@@ -574,97 +453,18 @@ function getChildContracts(contractId) {
   }));
 }
 
-function getContractStats(contractId) {
-  const db = getDb();
-  const contract = mapContractRow(getRawContract(contractId));
-  if (!contract) return null;
-
-  const projectIds = db.prepare(
-    'SELECT project_id FROM contract_project_links WHERE contract_id = ?'
-  ).all(contractId).map((r) => r.project_id);
-
-  const childRow = db.prepare(`
-    SELECT COUNT(*) AS cnt, COALESCE(SUM(agency_fee), 0) AS fee
-    FROM contracts WHERE parent_contract_id = ?
-  `).get(contractId);
-
-  if (projectIds.length === 0) {
-    return {
-      projectCount: 0,
-      totalInvestment: 0,
-      winAmount: 0,
-      contractAmount: contract.contractAmount == null ? null : contract.contractAmount,
-      childCount: Number(childRow?.cnt) || 0,
-      childAgencyFee: Number(childRow?.fee) || 0,
-      categories: []
-    };
-  }
-
-  const placeholders = projectIds.map(() => '?').join(', ');
-  const totals = db.prepare(`
-    SELECT
-      COUNT(*) AS project_count,
-      COALESCE(SUM(psi.total_investment), 0) AS total_investment,
-      COALESCE(SUM((
-        SELECT COALESCE(SUM(s.win_amount), 0)
-        FROM project_search_segment s
-        WHERE s.project_id = p.id
-      )), 0) AS win_amount
-    FROM projects p
-    LEFT JOIN project_search_index psi ON psi.project_id = p.id
-    WHERE p.id IN (${placeholders})
-  `).get(...projectIds);
-
-  const categories = db.prepare(`
-    SELECT
-      COALESCE(c.code, '') AS code,
-      COALESCE(c.name, '未分类') AS name,
-      COUNT(*) AS project_count,
-      COALESCE(SUM(psi.total_investment), 0) AS total_investment,
-      COALESCE(SUM((
-        SELECT COALESCE(SUM(s.win_amount), 0)
-        FROM project_search_segment s
-        WHERE s.project_id = p.id
-      )), 0) AS win_amount
-    FROM projects p
-    LEFT JOIN project_categories c ON c.id = p.category_id
-    LEFT JOIN project_search_index psi ON psi.project_id = p.id
-    WHERE p.id IN (${placeholders})
-    GROUP BY c.id, c.code, c.name
-    ORDER BY c.sort_order ASC, c.name ASC
-  `).all(...projectIds);
-
-  return {
-    projectCount: Number(totals?.project_count) || 0,
-    totalInvestment: Number(totals?.total_investment) || 0,
-    winAmount: Number(totals?.win_amount) || 0,
-    contractAmount: contract.contractAmount == null ? null : contract.contractAmount,
-    childCount: Number(childRow?.cnt) || 0,
-    childAgencyFee: Number(childRow?.fee) || 0,
-    categories: categories.map((c) => ({
-      code: c.code,
-      name: c.name,
-      projectCount: Number(c.project_count) || 0,
-      totalInvestment: Number(c.total_investment) || 0,
-      winAmount: Number(c.win_amount) || 0
-    }))
-  };
-}
-
 function getContractDetail(id, currentUserId) {
   const contract = getContractById(id);
   if (!contract) return null;
   const parent = contract.parentContractId ? getContractById(contract.parentContractId) : null;
   return {
     ...contract,
-    projects: getContractProjectLinks(id, currentUserId),
     children: getChildContracts(id),
     parent: parent ? {
       id: parent.id,
       seqNo: parent.seqNo,
       name: parent.name
-    } : null,
-    stats: getContractStats(id)
+    } : null
   };
 }
 
@@ -677,10 +477,8 @@ function listContracts({
   pageSize = 50,
   search = '',
   searchType = 'contract',
-  anchorOnly = false,
   paymentOnly = false,
   childOnly = false,
-  linkStatus = '',
   missingCredit = false
 } = {}) {
   const db = getDb();
@@ -689,34 +487,16 @@ function listContracts({
   const conditions = [];
   const params = [];
 
-  if (search) {
-    if (searchType === 'project') {
-      conditions.push(`EXISTS (
-        SELECT 1 FROM contract_project_links l
-        WHERE l.contract_id = c.id AND (
-          l.project_name LIKE ? ESCAPE '\\'
-          OR EXISTS (SELECT 1 FROM projects p WHERE p.id = l.project_id AND p.name LIKE ? ESCAPE '\\')
-        )
-      )`);
-      const pattern = `%${String(search).replace(/[%_\\]/g, (ch) => `\\${ch}`)}%`;
-      params.push(pattern, pattern);
-    } else {
-      const sc = buildSearchCondition(search, ['c.name', 'c.counterparty', 'c.nature_raw']);
-      if (sc) {
-        conditions.push(sc.condition);
-        params.push(...sc.params);
-      }
+if (search) {
+    const sc = buildSearchCondition(search, ['c.name', 'c.counterparty', 'c.nature_raw']);
+    if (sc) {
+      conditions.push(sc.condition);
+      params.push(...sc.params);
     }
   }
 
-  if (parseBoolQuery(anchorOnly)) conditions.push('c.is_anchor = 1');
   if (parseBoolQuery(paymentOnly)) conditions.push('c.is_payment = 1');
   if (parseBoolQuery(childOnly)) conditions.push('c.parent_contract_id IS NOT NULL');
-  if (linkStatus === 'linked') {
-    conditions.push('EXISTS (SELECT 1 FROM contract_project_links l WHERE l.contract_id = c.id)');
-  } else if (linkStatus === 'unlinked') {
-    conditions.push('NOT EXISTS (SELECT 1 FROM contract_project_links l WHERE l.contract_id = c.id)');
-  }
   if (parseBoolQuery(missingCredit)) {
     conditions.push("(c.credit_code_raw IS NULL OR TRIM(c.credit_code_raw) = '')");
   }
@@ -725,7 +505,6 @@ function listContracts({
   const total = db.prepare(`SELECT COUNT(*) AS cnt FROM contracts c ${whereClause}`).get(...params).cnt;
   const rows = db.prepare(`
     SELECT c.*,
-      (SELECT COUNT(*) FROM contract_project_links l WHERE l.contract_id = c.id) AS project_count,
       (SELECT COUNT(*) FROM contracts ch WHERE ch.parent_contract_id = c.id) AS child_count
     FROM contracts c
     ${whereClause}
@@ -733,129 +512,21 @@ function listContracts({
     LIMIT ? OFFSET ?
   `).all(...params, limit, offset);
 
-  const linkStmt = db.prepare(`
-    SELECT project_name FROM contract_project_links
-    WHERE contract_id = ?
-    ORDER BY created_at ASC
-  `);
-
-  const items = rows.map((row) => {
-    const projectNames = linkStmt.all(row.id).map((r) => r.project_name);
-    return {
-      ...mapContractRow(row),
-      projectCount: Number(row.project_count) || 0,
-      projectNames,
-      projectNamesPreview: projectNames.slice(0, 3).join('、'),
-      childCount: Number(row.child_count) || 0
-    };
-  });
+  const items = rows.map((row) => ({
+    ...mapContractRow(row),
+    childCount: Number(row.child_count) || 0
+  }));
 
   return { items, total, page, pageSize: limit };
 }
 
-function saveContractProjects(contractId, projectIds, { userId, userName, name } = {}) {
-  const db = getDb();
-  const contract = getRawContract(contractId);
-  if (!contract) {
-    throw Object.assign(new Error('合同不存在'), { status: 404 });
-  }
-  if (!contract.is_anchor || contract.is_payment) {
-    throw Object.assign(new Error('只有大合同才能关联项目'), { status: 409 });
-  }
 
-  const normalizedIds = [...new Set(
-    (Array.isArray(projectIds) ? projectIds : [])
-      .map((id) => String(id || '').trim())
-      .filter(Boolean)
-  )];
 
-  const transaction = db.transaction(() => {
-    if (name !== undefined && name !== null) {
-      const trimmed = String(name).trim();
-      if (!trimmed) throw Object.assign(new Error('合同名称不能为空'), { status: 400 });
-      db.prepare("UPDATE contracts SET name = ?, updated_at = datetime('now') WHERE id = ?").run(trimmed, contractId);
-    }
-
-    const existingLinks = db.prepare(`
-      SELECT id, project_id FROM contract_project_links WHERE contract_id = ?
-    `).all(contractId);
-    const existingByProject = new Map(existingLinks.map((l) => [l.project_id, l]));
-    const targetSet = new Set(normalizedIds);
-
-    for (const link of existingLinks) {
-      if (!targetSet.has(link.project_id)) {
-        db.prepare('DELETE FROM contract_project_links WHERE id = ?').run(link.id);
-      }
-    }
-
-    const getProject = db.prepare('SELECT id, name FROM projects WHERE id = ?');
-    for (const projectId of normalizedIds) {
-      if (existingByProject.has(projectId)) continue;
-      const project = getProject.get(projectId);
-      if (!project) throw Object.assign(new Error(`项目不存在: ${projectId}`), { status: 400 });
-      db.prepare(`
-        INSERT INTO contract_project_links (id, contract_id, project_id, project_name, created_by, created_by_name)
-        VALUES (?, ?, ?, ?, ?, ?)
-      `).run(crypto.randomUUID(), contractId, projectId, project.name, userId || '', userName || '');
-    }
-  });
-
-  transaction();
-  return getContractDetail(contractId, userId);
-}
-
-function searchProjectsForAdmin({ q = '', page = 1, pageSize = 20, excludeContractId = '' } = {}) {
-  const db = getDb();
-  const offset = (Math.max(1, page) - 1) * pageSize;
-  const conditions = [];
-  const params = [];
-
-  if (q) {
-    const sc = buildSearchCondition(q, ['p.name', 'p.project_no']);
-    if (sc) {
-      conditions.push(sc.condition);
-      params.push(...sc.params);
-    }
-  }
-
-  if (excludeContractId) {
-    conditions.push(`p.id NOT IN (
-      SELECT project_id FROM contract_project_links WHERE contract_id = ?
-    )`);
-    params.push(excludeContractId);
-  }
-
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const total = db.prepare(`SELECT COUNT(*) AS cnt FROM projects p ${whereClause}`).get(...params).cnt;
-  const rows = db.prepare(`
-    SELECT p.id, p.name, p.status, p.project_no
-    FROM projects p
-    ${whereClause}
-    ORDER BY p.updated_at DESC
-    LIMIT ? OFFSET ?
-  `).all(...params, pageSize, offset);
-
-  return {
-    items: rows.map((r) => ({
-      id: r.id,
-      name: r.name,
-      status: r.status,
-      projectNo: r.project_no || ''
-    })),
-    total,
-    page,
-    pageSize
-  };
-}
-
-function searchContracts({ q = '', limit = 20, anchorOnly = true } = {}) {
+function searchContracts({ q = '', limit = 20 } = {}) {
   const db = getDb();
   const conditions = [];
   const params = [];
 
-  if (parseBoolQuery(anchorOnly)) {
-    conditions.push('c.is_anchor = 1', 'c.is_payment = 0');
-  }
   if (q) {
     const sc = buildSearchCondition(q, ['c.name', 'c.counterparty', 'c.nature_raw']);
     if (sc) {
@@ -867,8 +538,7 @@ function searchContracts({ q = '', limit = 20, anchorOnly = true } = {}) {
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
   const lim = Math.min(Math.max(1, limit), 50);
   const rows = db.prepare(`
-    SELECT c.id, c.name, c.seq_no, c.is_anchor, c.is_payment,
-      (SELECT COUNT(*) FROM contract_project_links l WHERE l.contract_id = c.id) AS project_count
+    SELECT c.id, c.name, c.seq_no, c.is_payment
     FROM contracts c
     ${whereClause}
     ORDER BY c.seq_no ASC, c.name ASC
@@ -880,125 +550,11 @@ function searchContracts({ q = '', limit = 20, anchorOnly = true } = {}) {
       id: r.id,
       name: r.name,
       seqNo: Number(r.seq_no) || 0,
-      isAnchor: !!r.is_anchor,
-      isPayment: !!r.is_payment,
-      projectCount: Number(r.project_count) || 0
+      isPayment: !!r.is_payment
     }))
   };
 }
 
-function getProjectContracts(projectId, currentUserId) {
-  const db = getDb();
-  const rows = db.prepare(`
-    SELECT l.*, c.name AS contract_name, c.seq_no, c.is_anchor
-    FROM contract_project_links l
-    JOIN contracts c ON c.id = l.contract_id
-    WHERE l.project_id = ?
-    ORDER BY l.created_at ASC
-  `).all(projectId);
-
-  return rows.map((row) => {
-    const mapped = mapLinkRow(row);
-    return {
-      linkId: mapped.linkId,
-      contractId: mapped.contractId,
-      contractName: row.contract_name,
-      seqNo: Number(row.seq_no) || 0,
-      isAnchor: !!row.is_anchor,
-      createdBy: mapped.createdBy,
-      createdByName: mapped.createdByName,
-      createdAt: mapped.createdAt,
-      canDelete: mapped.createdBy === currentUserId
-    };
-  });
-}
-
-function getLinkById(linkId) {
-  const db = getDb();
-  const row = db.prepare('SELECT * FROM contract_project_links WHERE id = ?').get(linkId);
-  return row ? mapLinkRow(row) : null;
-}
-
-function addProjectContract(projectId, contractId, { userId, userName } = {}) {
-  const db = getDb();
-  const project = db.prepare('SELECT id, name FROM projects WHERE id = ?').get(projectId);
-  if (!project) {
-    throw Object.assign(new Error('项目不存在'), { status: 404 });
-  }
-  const contract = getRawContract(contractId);
-  if (!contract) {
-    throw Object.assign(new Error('合同不存在'), { status: 404 });
-  }
-  if (!contract.is_anchor || contract.is_payment) {
-    throw Object.assign(new Error('只能关联大合同'), { status: 409 });
-  }
-
-  const existing = db.prepare(`
-    SELECT id FROM contract_project_links WHERE contract_id = ? AND project_id = ?
-  `).get(contractId, projectId);
-  if (existing) {
-    throw Object.assign(new Error('该项目已关联此合同'), { status: 409 });
-  }
-
-  const linkId = crypto.randomUUID();
-  try {
-    db.prepare(`
-      INSERT INTO contract_project_links (id, contract_id, project_id, project_name, created_by, created_by_name)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(linkId, contractId, projectId, project.name, userId || '', userName || '');
-  } catch (err) {
-    if (String(err.message || '').includes('UNIQUE constraint')) {
-      throw Object.assign(new Error('该项目已关联此合同'), { status: 409 });
-    }
-    throw err;
-  }
-
-  const row = db.prepare(`
-    SELECT l.*, c.name AS contract_name, c.seq_no, c.is_anchor
-    FROM contract_project_links l
-    JOIN contracts c ON c.id = l.contract_id
-    WHERE l.id = ?
-  `).get(linkId);
-
-  return {
-    linkId: row.id,
-    contractId: row.contract_id,
-    contractName: row.contract_name,
-    seqNo: Number(row.seq_no) || 0,
-    isAnchor: !!row.is_anchor,
-    createdBy: row.created_by,
-    createdByName: row.created_by_name || '',
-    createdAt: row.created_at,
-    canDelete: true
-  };
-}
-
-function removeProjectContract(linkId, projectId, currentUserId) {
-  const db = getDb();
-  const row = db.prepare(`
-    SELECT * FROM contract_project_links WHERE id = ? AND project_id = ?
-  `).get(linkId, projectId);
-  if (!row) {
-    throw Object.assign(new Error('关联不存在'), { status: 404 });
-  }
-  if (row.created_by !== currentUserId) {
-    throw Object.assign(new Error('只能删除自己添加的关联'), { status: 403 });
-  }
-  db.prepare('DELETE FROM contract_project_links WHERE id = ?').run(linkId);
-  return { success: true };
-}
-
-function syncProjectName(projectId, newName) {
-  const db = getDb();
-  db.prepare(`
-    UPDATE contract_project_links SET project_name = ? WHERE project_id = ?
-  `).run(String(newName || '').trim(), projectId);
-}
-
-function deleteLinksByProjectId(projectId) {
-  const db = getDb();
-  db.prepare('DELETE FROM contract_project_links WHERE project_id = ?').run(projectId);
-}
 
 module.exports = {
   getDb,
@@ -1008,16 +564,7 @@ module.exports = {
   updateContract,
   deleteContract,
   getContractDetail,
-  getContractStats,
   getChildContracts,
   listContracts,
-  saveContractProjects,
-  searchProjectsForAdmin,
-  searchContracts,
-  getProjectContracts,
-  getLinkById,
-  addProjectContract,
-  removeProjectContract,
-  syncProjectName,
-  deleteLinksByProjectId
+  searchContracts
 };

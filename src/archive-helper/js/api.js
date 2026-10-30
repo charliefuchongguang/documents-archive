@@ -267,29 +267,23 @@ window.API = {
   },
 
   // ==========================================
-  // 合同管理 API
+  // 合同台账 API（印花税，仅管理员）
   // ==========================================
 
   async listContracts({
     page = 1,
     pageSize = 50,
     search = '',
-    searchType = 'contract',
-    anchorOnly = false,
     paymentOnly = false,
     childOnly = false,
-    linkStatus = '',
     missingCredit = false
   } = {}) {
     const params = new URLSearchParams();
     params.set('page', String(page));
     params.set('pageSize', String(pageSize));
     if (search) params.set('search', search);
-    if (searchType) params.set('searchType', searchType);
-    if (anchorOnly) params.set('anchorOnly', '1');
     if (paymentOnly) params.set('paymentOnly', '1');
     if (childOnly) params.set('childOnly', '1');
-    if (linkStatus) params.set('linkStatus', linkStatus);
     if (missingCredit) params.set('missingCredit', '1');
     return Http.get('/contracts?' + params.toString());
   },
@@ -312,36 +306,62 @@ window.API = {
     return Http.del('/contracts/' + encodeURIComponent(id));
   },
 
-  async saveContractProjects(id, { name, projectIds }) {
-    return Http.put('/contracts/' + encodeURIComponent(id) + '/projects', { name, projectIds });
-  },
-
-  async searchContractsForAdmin({ q = '', page = 1, pageSize = 20, excludeContractId = '' } = {}) {
-    const params = new URLSearchParams();
-    if (q) params.set('q', q);
-    params.set('page', String(page));
-    params.set('pageSize', String(pageSize));
-    if (excludeContractId) params.set('excludeContractId', excludeContractId);
-    return Http.get('/contracts/projects/search?' + params.toString());
-  },
-
-  async searchContracts(q, limit = 20, anchorOnly = true) {
+  async searchContracts(q, limit = 20) {
     const params = new URLSearchParams();
     if (q) params.set('q', q);
     params.set('limit', String(limit));
-    params.set('anchorOnly', anchorOnly ? '1' : '0');
     return Http.get('/contracts/search?' + params.toString());
   },
 
-  async getProjectContracts(projectId) {
-    return Http.get('/projects/' + encodeURIComponent(projectId) + '/contracts');
+  // ==========================================
+  // 工程项目 API（业主立项工程，仅用于归档分组）
+  // ==========================================
+
+  async listMasterProjects({
+    page = 1,
+    pageSize = 20,
+    search = '',
+    ownerName = '',
+    year = '',
+    status = ''
+  } = {}) {
+    const params = new URLSearchParams();
+    params.set('page', String(page));
+    params.set('pageSize', String(pageSize));
+    if (search) params.set('search', search);
+    if (ownerName) params.set('ownerName', ownerName);
+    if (year) params.set('year', year);
+    if (status) params.set('status', status);
+    return Http.get('/master-projects?' + params.toString());
   },
 
-  async addProjectContract(projectId, contractId) {
-    return Http.post('/projects/' + encodeURIComponent(projectId) + '/contracts', { contractId });
+  async searchMasterProjects(q, limit = 5) {
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    params.set('limit', String(limit));
+    return Http.get('/master-projects/search?' + params.toString());
   },
 
-  async removeProjectContract(projectId, linkId) {
-    return Http.del('/projects/' + encodeURIComponent(projectId) + '/contracts/' + encodeURIComponent(linkId));
+  async getMasterProject(id) {
+    return Http.get('/master-projects/' + encodeURIComponent(id));
+  },
+
+  async createMasterProject(data) {
+    return Http.post('/master-projects', data || {});
+  },
+
+  async updateMasterProject(id, data) {
+    return Http.put('/master-projects/' + encodeURIComponent(id), data || {});
+  },
+
+  async deleteMasterProject(id) {
+    return Http.del('/master-projects/' + encodeURIComponent(id));
+  },
+
+  async updateProjectMasterProject(projectId, masterProjectId, ownerNameSnapshot = '') {
+    return Http.patch('/projects/' + encodeURIComponent(projectId) + '/master-project', {
+      masterProjectId: masterProjectId || null,
+      ownerNameSnapshot
+    });
   }
 };
