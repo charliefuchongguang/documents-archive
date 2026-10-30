@@ -3574,3 +3574,112 @@ a:hover {
   color: var(--color-text-muted);
 }
 .project-head-meta b { color: var(--color-text); font-weight: 500; margin-left: 5px; }
+
+/* 表格操作列：统一单行横向对齐，避免文字按钮换行/上下错位 */
+.table-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.table-actions .el-button + .el-button { margin-left: 0; }
+.table-actions .el-button.is-text { padding: 2px 4px; height: auto; min-height: 24px; }
+
+/* 复核页：防止清除按钮/冲突候选把表单与页面撑宽 */
+.review-form {
+  min-width: 0;
+  overflow-x: clip;
+}
+.review-form .el-form {
+  min-width: 0;
+}
+.review-form .el-form-item {
+  min-width: 0;
+}
+.review-form .el-form-item__content {
+  min-width: 0;
+}
+.review-form .field-wrapper {
+  min-width: 0;
+}
+.review-form .el-input,
+.review-form .el-select,
+.review-form .el-autocomplete,
+.review-form .el-textarea,
+.review-form .el-date-editor {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+.review-form .el-input__wrapper,
+.review-form .el-select__wrapper,
+.review-form .el-textarea__inner {
+  min-width: 0;
+}
+.review-form .el-input__inner,
+.review-form .el-select__selected-item,
+.review-form .el-select__placeholder {
+  min-width: 0;
+}
+.review-form .el-input__suffix,
+.review-form .el-input__prefix {
+  flex: 0 0 auto;
+}
+
+/* 冲突条占满整行，候选按钮内部换行，不再撑宽页面 */
+.review-form .el-form .el-form-item:has(.conflict-bar) {
+  grid-column: 1 / -1;
+}
+.conflict-bar {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+.conflict-bar > span {
+  min-width: 0;
+  max-width: 100%;
+}
+.conflict-bar .el-button {
+  max-width: 100%;
+  height: auto;
+  min-height: 24px;
+  white-space: normal;
+  text-align: left;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* 归档项目详情页：纸质核对面板 */
+.paper-review-panel { margin-top: 12px; }
+.paper-review-hint {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+  margin-bottom: 10px;
+}
+.paper-review-progress-row {
+  font-size: 13px;
+  color: var(--color-text-secondary);
+  margin-bottom: 8px;
+}
+.paper-review-progress-row b { color: var(--color-text); font-size: 16px; margin: 0 2px; }
+.paper-review-missing {
+  max-height: 96px;
+  overflow: auto;
+  margin-bottom: 10px;
+  padding: 7px 9px;
+  border-radius: 4px;
+  background: var(--status-pending-bg);
+  color: var(--status-pending);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.paper-review-comment .preview-label {
+  display: block;
+  margin-bottom: 5px;
+}
+.paper-review-submit {
+  width: 100%;
+  margin-top: 12px;
+}

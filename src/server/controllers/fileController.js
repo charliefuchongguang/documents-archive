@@ -510,16 +510,35 @@ module.exports = {
       if (!existing) return res.status(404).json({ error: '文件不存在' });
       const project = requireAccessibleProjectByFile(req, res, existing);
       if (!project) return;
-      if (respondIfProjectLocked(res, project)) return;
 
       const payload = { ...req.body };
-      if (payload.hasPaper !== undefined || payload.has_paper !== undefined) {
+      const isPaperMark = payload.hasPaper !== undefined || payload.has_paper !== undefined;
+      const onlyPaperMark = isPaperMark
+        && Object.keys(payload).every((key) => key === 'hasPaper' || key === 'has_paper');
+
+      // 纸质核对阶段：仅允许管理员修改“含纸质”，并同步确认状态
+      if (project.status === STATUS.PENDING_PAPER) {
+        if (!onlyPaperMark) {
+          return res.status(409).json({ error: '当前项目处于纸质核对，仅可修改含纸质标记' });
+        }
+        if (!userMgmtDao.isUserAdmin(req.user?.userid)) {
+          return res.status(403).json({ error: '仅管理员可核对纸质档' });
+        }
+      } else if (respondIfProjectLocked(res, project)) {
+        return;
+      }
+
+      if (isPaperMark) {
         if (!isPaperMarkableFile(existing)) {
           return res.status(400).json({ error: '当前文件状态不可标记含纸质' });
         }
         const raw = payload.hasPaper !== undefined ? payload.hasPaper : payload.has_paper;
         payload.hasPaper = raw === true || raw === 1 || raw === '1' ? 1 : 0;
         delete payload.has_paper;
+        // 纸质核对阶段勾选“含纸质”即代表已收到，直接同步确认状态
+        if (project.status === STATUS.PENDING_PAPER) {
+          payload.paperReviewed = payload.hasPaper;
+        }
       }
 
       const file = dao.updateFile(req.params.id, payload);
