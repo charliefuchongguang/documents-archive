@@ -7,6 +7,7 @@
 const path = require('path');
 const fs = require('fs');
 const config = require('../config');
+const archiveTemplates = require('../config/archiveTemplates');
 
 /** WebDAV URL 编码路径保守上限（实测 OK≈347、失败≈381） */
 const NAS_MAX_ENCODED_PATH_LEN = 340;
@@ -523,6 +524,42 @@ function validateWinNoticeDateRequirements(
 }
 
 /**
+ * 是否造价咨询类项目（造价类没有中标通知书，归档年度另取合同日期）
+ * @param {Object} project
+ * @param {Object} formData
+ * @returns {boolean}
+ */
+function isCostConsultProject(project, formData) {
+  const categoryId = String(project?.category_id || '');
+  const categoryCode = String(project?.category_code || project?.categoryCode || '');
+  if (categoryId === 'cat_cost' || categoryCode === 'cost') return true;
+  try {
+    return archiveTemplates.resolveTemplateCode(project || {}, formData || {}) === 'cost_consult';
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 解析造价咨询项目归档年度
+ * 优先合同签订日期（entrustDate），其次项目创建时间，最后当前年份
+ * @param {Object} project
+ * @param {Object} formData
+ * @returns {string} 4 位年份
+ */
+function resolveCostArchiveYear(project, formData) {
+  const raw = formData && (formData.entrustDate || formData.contractDate);
+  const matched = String(raw || '').match(/(?:19|20)\d{2}/);
+  if (matched) return matched[0];
+
+  const created = project && project.created_at ? new Date(project.created_at) : null;
+  if (created && !Number.isNaN(created.getTime())) {
+    return String(created.getFullYear());
+  }
+  return String(new Date().getFullYear());
+}
+
+/**
  * 校验归档所需信息是否齐备（本地文件必须存在）
  * @param {Object} project
  * @param {Array} files
@@ -544,17 +581,23 @@ function validateArchiveNasReadiness(
     errors.push('所属地域未设置');
   }
 
-  const winNoticeCheck = validateWinNoticeDateRequirements(
-    project,
-    files,
-    mergedFormData,
-    segmentExtractedMap,
-    extraSegmentFormData
-  );
-  if (!winNoticeCheck.ok) {
-    errors.push(winNoticeCheck.error || '缺少有效的中标通知书日期');
+  let year = null;
+  if (isCostConsultProject(project, mergedFormData)) {
+    // 造价咨询项目无中标通知书，归档年度取合同签订日期/创建年度
+    year = resolveCostArchiveYear(project, mergedFormData);
+  } else {
+    const winNoticeCheck = validateWinNoticeDateRequirements(
+      project,
+      files,
+      mergedFormData,
+      segmentExtractedMap,
+      extraSegmentFormData
+    );
+    if (!winNoticeCheck.ok) {
+      errors.push(winNoticeCheck.error || '缺少有效的中标通知书日期');
+    }
+    year = winNoticeCheck.year;
   }
-  const year = winNoticeCheck.year;
 
   const filesWithoutLocal = (files || []).filter((f) => !hasLocalFile(f.local_path));
   if (filesWithoutLocal.length > 0) {
@@ -596,5 +639,7 @@ module.exports = {
   isValidWinNoticeDateValue,
   getSegmentWinNoticeDate,
   validateWinNoticeDateRequirements,
+  isCostConsultProject,
+  resolveCostArchiveYear,
   validateArchiveNasReadiness
 };

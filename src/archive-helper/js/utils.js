@@ -3,6 +3,27 @@
  * 挂载到全局 window.Utils
  */
 
+/**
+ * 造价咨询类归档文件类型
+ * 依据《业务档案归档管理办法》第六条「造价咨询业务归档内容」
+ * 仅造价咨询合同参与 AI 摘录（项目名称 + 合同金额），其余类型仅存储
+ */
+const COST_DOC_TYPES = {
+  cost_project_intake: { label: '拟承接项目情况表', required: false, batchSelectable: false, storeOnly: true },
+  cost_application: { label: '委托咨询申请书', required: false, batchSelectable: false, storeOnly: true },
+  cost_contract: { label: '造价咨询合同', required: true },
+  cost_implementation: { label: '实施项目情况表', required: false, batchSelectable: false, storeOnly: true },
+  cost_task_book: { label: '造价咨询项目任务书', required: false, batchSelectable: false, storeOnly: true },
+  cost_raw_material: { label: '造价咨询业务原始资料', required: true, batchSelectable: false, storeOnly: true },
+  cost_result: { label: '造价咨询成果文件', required: true, batchSelectable: false, storeOnly: true },
+  cost_process: { label: '造价咨询过程文件', required: true, batchSelectable: false, storeOnly: true },
+  cost_evaluation: { label: '造价咨询工作履约评价表', required: true, batchSelectable: false, storeOnly: true },
+  cost_return_visit: { label: '咨询工作回访记录', required: true, batchSelectable: false, storeOnly: true },
+  cost_other_attach: { label: '其它附件', required: false, batchSelectable: false, storeOnly: true }
+};
+
+const COST_DOC_TYPE_CODES = Object.keys(COST_DOC_TYPES);
+
 window.Utils = {
 
   // ==================== 枚举常量 ====================
@@ -56,7 +77,37 @@ window.Utils = {
     prequal_notice: { label: '资格预审公告', required: false, batchSelectable: false, storeOnly: true },
     prequal_doc: { label: '资格预审文件', required: false, batchSelectable: false, storeOnly: true },
     prequal_review: { label: '评审报告（资格预审）', required: false, batchSelectable: false, storeOnly: true },
-    other_attach: { label: '其它附件', required: false, batchSelectable: false, storeOnly: true }
+    other_attach: { label: '其它附件', required: false, batchSelectable: false, storeOnly: true },
+    ...COST_DOC_TYPES
+  },
+
+  COST_DOC_TYPES,
+  COST_DOC_TYPE_CODES,
+
+  /**
+   * 按业务分类取可上传的文档类型
+   * - 招标代理：全部招标类文档
+   * - 咨询：通用文档，隐藏招标专用类型
+   * - 造价咨询：仅《归档管理办法》第六条列明的造价类文件
+   * @param {'tender'|'consult'|'cost'} categoryCode
+   * @returns {Object}
+   */
+  getDocTypesForCategory(categoryCode) {
+    const all = this.DOC_TYPES || {};
+    const costKeys = new Set(this.COST_DOC_TYPE_CODES || []);
+    if (categoryCode === 'cost') {
+      return Object.fromEntries(
+        Object.entries(all).filter(([code]) => costKeys.has(code))
+      );
+    }
+    const tenderOnly = new Set(this.TENDER_ONLY_DOC_TYPES || []);
+    return Object.fromEntries(
+      Object.entries(all).filter(([code]) => {
+        if (costKeys.has(code)) return false;
+        if (categoryCode !== 'tender' && tenderOnly.has(code)) return false;
+        return true;
+      })
+    );
   },
 
   /**
@@ -104,7 +155,17 @@ window.Utils = {
       'approval',
       'prequal_notice',
       'prequal_doc',
-      'prequal_review'
+      'prequal_review',
+      'cost_project_intake',
+      'cost_application',
+      'cost_implementation',
+      'cost_task_book',
+      'cost_raw_material',
+      'cost_result',
+      'cost_process',
+      'cost_evaluation',
+      'cost_return_visit',
+      'cost_other_attach'
     ],
     get ALLOWED_EXTS() {
       return [...this.MINERU_EXTS, ...this.TEXT_EXTS, ...this.STORE_ONLY_EXTS];
@@ -232,6 +293,8 @@ window.Utils = {
     { key: 'contractName', label: '合同名称', group: 'contract', type: 'text', required: false },
     { key: 'entrustDate', label: '委托时间', group: 'contract', type: 'partialDate', required: false },
     { key: 'entrustAmount', label: '委托金额(万元)', group: 'contract', type: 'number', required: false },
+    // 造价咨询项目专用：合同价款（万元）
+    { key: 'contractAmount', label: '合同金额（万元）', group: 'contract', type: 'number', required: false },
     { key: 'projectManager', label: '项目负责人', group: 'contract', type: 'text', required: false },
     { key: 'techManager', label: '技术负责人', group: 'contract', type: 'text', required: false },
     { key: 'otherMembers', label: '其他参与人员', group: 'contract', type: 'text', required: false },

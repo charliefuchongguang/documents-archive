@@ -41,7 +41,18 @@ const STORE_ONLY_DOC_TYPES = [
   'approval',
   'prequal_notice',
   'prequal_doc',
-  'prequal_review'
+  'prequal_review',
+  // 造价咨询类：除造价咨询合同外均仅存储，不转 MD、不提取
+  'cost_project_intake',
+  'cost_application',
+  'cost_implementation',
+  'cost_task_book',
+  'cost_raw_material',
+  'cost_result',
+  'cost_process',
+  'cost_evaluation',
+  'cost_return_visit',
+  'cost_other_attach'
 ];
 
 const ALLOWED_EXTS = [...MINERU_EXTS, ...TEXT_EXTS, ...STORE_ONLY_EXTS];
