@@ -4,7 +4,7 @@
  * - 招标项目叠加发改委《招标人主体责任履行指引》第三十四条、
  *   交通运输部《公路工程建设项目资格预审文件和招标文件公平竞争合规指引》相关目录
  */
-const TEMPLATE_VERSION = '2026.10-1';
+const TEMPLATE_VERSION = '2026.11-1';
 const EMPTY_FOLDER_SUFFIX = '（空）';
 
 function item(key, name, order, options = {}) {
@@ -278,22 +278,22 @@ const TEMPLATE_DEFS = {
     code: 'cost_consult',
     label: '造价咨询',
     items: [
-      item('project_intake', '拟承接项目情况表', 20, { keywords: ['拟承接', '项目情况表'] }),
-      item('application', '委托咨询申请书', 30, { keywords: ['委托咨询申请', '申请书'] }),
-      item('contract', '造价咨询合同', 40, { docTypes: ['contract'], keywords: ['造价咨询合同', '咨询合同'] }),
-      item('implementation', '实施项目情况表', 50, { keywords: ['实施项目', '项目情况表'] }),
-      item('task_book', '造价咨询项目任务书', 60, { keywords: ['任务书', '项目任务书'] }),
-      item('raw_material', '造价咨询业务原始资料', 200, { keywords: ['原始资料', '工程量清单', '材料价格'] }),
-      item('result', '造价咨询成果文件', 210, { keywords: ['成果文件', '造价成果'] }),
-      item('process_docs', '造价咨询过程文件', 220, { docTypes: ['other_attach'], keywords: ['过程文件', '编制记录', '校审记录'] }),
-      item('evaluation', '造价咨询工作履约评价表', 380, { docTypes: ['evaluation'], keywords: ['履约评价', '评价表'] }),
-      item('return_visit', '咨询工作回访记录', 390, { keywords: ['回访记录', '回访'] })
+      item('project_intake', '拟承接项目情况表', 20, { docTypes: ['cost_project_intake'], keywords: ['拟承接', '项目情况表'] }),
+      item('application', '委托咨询申请书', 30, { docTypes: ['cost_application'], keywords: ['委托咨询申请', '申请书'] }),
+      item('contract', '造价咨询合同', 40, { docTypes: ['cost_contract', 'contract'], keywords: ['造价咨询合同', '咨询合同'] }),
+      item('implementation', '实施项目情况表', 50, { docTypes: ['cost_implementation'], keywords: ['实施项目', '项目情况表'] }),
+      item('task_book', '造价咨询项目任务书', 60, { docTypes: ['cost_task_book'], keywords: ['任务书', '项目任务书'] }),
+      item('raw_material', '造价咨询业务原始资料', 200, { docTypes: ['cost_raw_material'], keywords: ['原始资料', '工程量清单', '材料价格'] }),
+      item('result', '造价咨询成果文件', 210, { docTypes: ['cost_result'], keywords: ['成果文件', '造价成果', '限价说明'] }),
+      item('process_docs', '造价咨询过程文件', 220, { docTypes: ['cost_process'], keywords: ['过程文件', '编制记录', '校审记录'] }),
+      item('evaluation', '造价咨询工作履约评价表', 380, { docTypes: ['cost_evaluation', 'evaluation'], keywords: ['履约评价', '评价表'] }),
+      item('return_visit', '咨询工作回访记录', 390, { docTypes: ['cost_return_visit'], keywords: ['回访记录', '回访'] })
     ]
   }
 };
 
 const OTHER_ITEM = item('other', '其他有关重要文件', 9999, {
-  docTypes: ['other_attach'],
+  docTypes: ['other_attach', 'cost_other_attach'],
   keywords: ['其他', '其它'],
   fallback: true,
   createIfFiles: true

@@ -1868,22 +1868,17 @@ app.component('project-page', {
       return Utils.PROVINCES;
     },
     /**
-     * 文档类型定义
+     * 文档类型定义（按当前项目服务类型过滤）
      */
     docTypes() {
-      return Utils.DOC_TYPES;
+      const category = (this.project && (this.project.categoryCode || 'tender')) || 'tender';
+      return Utils.getDocTypesForCategory(category);
     },
     /**
-     * 页面展示的文档类型：非招标项目隐藏资格预审/批复等招标专用类型
+     * 页面展示的文档类型（与 docTypes 一致，保留旧调用名）
      */
     displayDocTypes() {
-      if (this.isTenderProject) return this.docTypes;
-      const exclude = new Set(Utils.TENDER_ONLY_DOC_TYPES || []);
-      const out = {};
-      Object.keys(this.docTypes).forEach(code => {
-        if (!exclude.has(code)) out[code] = this.docTypes[code];
-      });
-      return out;
+      return this.docTypes;
     },
     /**
      * 可勾选一键提取的文档类型（按 DOC_TYPES 顺序）
@@ -1978,7 +1973,10 @@ app.component('project-page', {
     previewFields() {
       if (!this.mergedResult) return [];
       const formData = this.mergedResult.formData || this.mergedResult;
-      return Utils.FIELDS
+      const fields = this.isCostProject
+        ? Utils.FIELDS.filter(f => ['projectName', 'contractAmount'].includes(f.key))
+        : Utils.FIELDS;
+      return fields
         .filter(f => {
           const cell = formData[f.key];
           if (!cell) return false;
@@ -1987,7 +1985,10 @@ app.component('project-page', {
         .slice(0, 8)
         .map(f => {
           const cell = formData[f.key];
-          return { label: f.label, value: typeof cell === 'object' ? cell.value : cell };
+          return {
+            label: this.isCostProject && f.key === 'projectName' ? '项目名称' : f.label,
+            value: typeof cell === 'object' ? cell.value : cell
+          };
         });
     },
     /**
@@ -2136,6 +2137,12 @@ app.component('project-page', {
      */
     isTenderProject() {
       return !this.project || (this.project.categoryCode || 'tender') === 'tender';
+    },
+    /**
+     * 是否造价咨询类项目（仅摘录项目名称与合同金额）
+     */
+    isCostProject() {
+      return !!(this.project && (this.project.categoryCode || '') === 'cost');
     },
     /**
      * 归档模板下拉选项
@@ -3792,11 +3799,11 @@ app.component('project-page', {
               <el-tag v-if="!canEditArchiveTemplate" size="small" type="info">只读</el-tag>
             </div>
 
-            <el-button size="small" @click="showSegmentConfig = !showSegmentConfig">
+            <el-button v-if="!isCostProject" size="small" @click="showSegmentConfig = !showSegmentConfig">
               {{ showSegmentConfig ? '收起标段配置' : (isLocked ? '查看标段' : '配置多标段') }}
             </el-button>
 
-            <div v-if="showSegmentConfig" style="width: 100%; background: #fff; border-radius: 8px; padding: 12px 16px; border: 1px solid #e4e7ed;">
+            <div v-if="!isCostProject && showSegmentConfig" style="width: 100%; background: #fff; border-radius: 8px; padding: 12px 16px; border: 1px solid #e4e7ed;">
               <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
                 <span style="font-size: 13px; font-weight: 500;">标段列表（共 {{ segments.length }} 个）</span>
                 <el-button v-if="!isLocked" size="small" type="primary" plain @click="addSegment">+ 添加标段</el-button>
@@ -4443,18 +4450,34 @@ app.component('review-page', {
   },
   computed: {
     /**
+     * 是否造价咨询类项目（仅展示项目名称、合同金额）
+     */
+    isCostProject() {
+      return !!(this.project && (this.project.categoryCode || '') === 'cost');
+    },
+    /**
+     * 当前项目复核页展示的字段
+     * 造价咨询类仅保留项目名称、合同金额
+     */
+    reviewFields() {
+      if (!this.isCostProject) return Utils.FIELDS.filter(f => f.key !== 'contractAmount');
+      return Utils.FIELDS
+        .filter(f => ['projectName', 'contractAmount'].includes(f.key))
+        .map(f => (f.key === 'projectName' ? { ...f, label: '项目名称' } : f));
+    },
+    /**
      * 字段分组列表
      */
     fieldGroups() {
       return Utils.FIELD_GROUPS.filter((g) =>
-        Utils.FIELDS.some((f) => f.group === g.key && !SEGMENT_FIELDS.includes(f.key))
+        this.reviewFields.some((f) => f.group === g.key && (this.isCostProject || !SEGMENT_FIELDS.includes(f.key)))
       );
     },
     /**
      * 所有字段定义
      */
     allFields() {
-      return Utils.FIELDS;
+      return this.reviewFields;
     },
     /**
      * 按 group 分组后的字段
@@ -4462,7 +4485,7 @@ app.component('review-page', {
     groupedFields() {
       const groups = {};
       Utils.FIELD_GROUPS.forEach(g => { groups[g.key] = []; });
-      Utils.FIELDS.forEach(f => {
+      this.reviewFields.forEach(f => {
         if (groups[f.group]) groups[f.group].push(f);
       });
       return groups;
@@ -4484,12 +4507,14 @@ app.component('review-page', {
      * 标段特有字段的字段定义列表（多标段时用于渲染各标段卡片）
      */
     segmentFieldDefs() {
+      if (this.isCostProject) return [];
       return Utils.FIELDS.filter(f => SEGMENT_FIELDS.includes(f.key) && !EVALUATION_FIELDS.includes(f.key));
     },
     /**
      * 履约评价字段定义（按标段渲染）
      */
     evaluationFieldDefs() {
+      if (this.isCostProject) return [];
       return Utils.FIELDS.filter(f => EVALUATION_FIELDS.includes(f.key));
     },
     /**
@@ -4663,6 +4688,11 @@ app.component('review-page', {
           this.formData.projectNo = '';
         }
 
+        // 造价咨询项目未提取到名称时，默认使用归档项目名称
+        if (this.isCostProject && !String(this.formData.projectName || '').trim()) {
+          this.formData.projectName = this.project.projectName || '';
+        }
+
         // 初始化各标段表单数据（单/多标段统一）
         this.segmentFormData = {};
         this.displaySegments.forEach((seg, idx) => {
@@ -4712,11 +4742,13 @@ app.component('review-page', {
 
         // 默认展开有数据的分组
         this.activeGroups = this.fieldGroups
-          .filter(g => Utils.FIELDS.some(
-            f => f.group === g.key && !SEGMENT_FIELDS.includes(f.key) && this.formData[f.key]
+          .filter(g => this.reviewFields.some(
+            f => f.group === g.key && (this.isCostProject || !SEGMENT_FIELDS.includes(f.key)) && this.formData[f.key]
           ))
           .map(g => g.key);
-        if (this.activeGroups.length === 0) {
+        if (this.isCostProject) {
+          this.activeGroups = this.fieldGroups.map(g => g.key);
+        } else if (this.activeGroups.length === 0) {
           this.activeGroups = ['basic']; // 至少展开基本信息
         }
         if (this.project && this.project.status === 'archived') {
@@ -4813,9 +4845,10 @@ app.component('review-page', {
      * @returns {boolean}
      */
     hasInvalidDates() {
-      if (this.formData.entrustDate && !Utils.isValidPartialDate(this.formData.entrustDate)) {
+      if (!this.isCostProject && this.formData.entrustDate && !Utils.isValidPartialDate(this.formData.entrustDate)) {
         return true;
       }
+      if (this.isCostProject) return false;
       const segments = Object.values(this.segmentFormData || {});
       return segments.some((seg) => seg && seg.evalDate && !Utils.isValidPartialDate(seg.evalDate));
     },
@@ -4958,7 +4991,7 @@ app.component('review-page', {
      * @returns {*}
      */
     getFieldValue(fieldKey) {
-      if (SEGMENT_FIELDS.includes(fieldKey)) {
+      if (!this.isCostProject && SEGMENT_FIELDS.includes(fieldKey)) {
         const segData = this.segmentFormData[this.currentSegment];
         return segData ? segData[fieldKey] : '';
       }
@@ -4972,14 +5005,14 @@ app.component('review-page', {
      * @param {*} value
      */
     setFieldValue(fieldKey, value) {
-      if (SEGMENT_FIELDS.includes(fieldKey)) {
+      if (!this.isCostProject && SEGMENT_FIELDS.includes(fieldKey)) {
         if (!this.segmentFormData[this.currentSegment]) {
           this.segmentFormData[this.currentSegment] = {};
         }
         this.segmentFormData[this.currentSegment][fieldKey] = value;
       } else {
         this.formData[fieldKey] = value;
-        if (!SEGMENT_FIELDS.includes(fieldKey)) {
+        if (!this.isCostProject && !SEGMENT_FIELDS.includes(fieldKey)) {
           Object.keys(this.segmentFormData).forEach(idx => {
             this.segmentFormData[idx][fieldKey] = value;
           });
@@ -4993,7 +5026,7 @@ app.component('review-page', {
      * @returns {boolean}
      */
     isSegmentField(fieldKey) {
-      return SEGMENT_FIELDS.includes(fieldKey);
+      return !this.isCostProject && SEGMENT_FIELDS.includes(fieldKey);
     },
 
     // onSegmentChange 已移除：不再使用 Tab 切换，改为列表式分区展示
@@ -5020,6 +5053,7 @@ app.component('review-page', {
      * @private
      */
     _syncSegmentFieldsToFormData() {
+      if (this.isCostProject) return;
       if (this.displaySegments.length === 1) {
         const segData = this.segmentFormData[0] || {};
         SEGMENT_FIELDS.forEach((key) => {
@@ -5124,6 +5158,13 @@ app.component('review-page', {
      * @returns {Object}
      */
     _buildSubmitBody() {
+      if (this.isCostProject) {
+        const data = { ...this.formData };
+        if (!String(data.projectName || '').trim()) {
+          data.projectName = (this.project && this.project.projectName) || '';
+        }
+        return { segmentFormData: [{ name: '', formData: data }] };
+      }
       const baseForm = { ...this.formData };
       SEGMENT_FIELDS.forEach((key) => { delete baseForm[key]; });
       const segmentFormData = this.displaySegments.map((seg, idx) => {
@@ -5181,10 +5222,20 @@ app.component('review-page', {
         ElMessage.warning('请先设置所属地域（在文件页配置）');
         return;
       }
-      const winNoticeMsg = this.getWinNoticeDateValidationMessage();
-      if (winNoticeMsg) {
-        ElMessage.warning(winNoticeMsg);
-        return;
+      if (this.isCostProject) {
+        if (!String(this.formData.projectName || '').trim() && this.project) {
+          this.formData.projectName = this.project.projectName || '';
+        }
+        if (!String(this.formData.projectName || '').trim()) {
+          ElMessage.warning('请填写项目名称');
+          return;
+        }
+      } else {
+        const winNoticeMsg = this.getWinNoticeDateValidationMessage();
+        if (winNoticeMsg) {
+          ElMessage.warning(winNoticeMsg);
+          return;
+        }
       }
 
       this.submitting = true;
@@ -5439,7 +5490,7 @@ app.component('review-page', {
             </el-collapse-item>
           </el-collapse>
 
-          <div style="padding: 16px 20px;">
+          <div v-if="!isCostProject" style="padding: 16px 20px;">
             <h4 style="margin-bottom: 12px; color: #303133;">各标段信息</h4>
             <el-card v-for="(seg, idx) in displaySegments" :key="idx" style="margin-bottom: 12px;" shadow="hover">
               <template #header>
@@ -5505,7 +5556,7 @@ app.component('review-page', {
           </div>
 
           <!-- 履约评价：置于标段信息之后，按标段独立填写 -->
-          <div class="evaluation-section">
+          <div v-if="!isCostProject" class="evaluation-section">
             <h4 style="margin: 0 0 6px; color: #303133;">履约评价</h4>
             <div class="evaluation-hint">
               优先取履约评价；无评价时自动带出招标文件中的招标人及联系人。评价信息按标段填写。

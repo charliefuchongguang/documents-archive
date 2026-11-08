@@ -169,6 +169,29 @@ window.Extract = {
 {"contractName":"...","entrustDate":"...","totalInvestment":null,...}
 
 文档内容：
+{{content}}`,
+
+    /**
+     * 造价咨询合同 — 仅摘录项目名称、合同金额
+     * entrustDate 供归档年度使用，不在造价复核页展示
+     */
+    cost_contract: `你是专业的造价咨询合同信息提取助手。请从以下造价咨询合同的 Markdown 内容中提取指定字段，并以严格的 JSON 格式返回。
+
+需要提取的字段：
+- projectName: 项目名称，即本合同对应的建设项目/委托项目名称（如「XX收费站改扩建工程施工项目限价编制」）。必须是项目本身名称，禁止返回「造价咨询合同」「咨询合同」等文件名或合同类型名称
+- contractAmount: 合同金额，取合同价款/咨询酬金/咨询服务费的含税总额，返回纯数字（万元）。文档金额单位为元时除以 10000
+- entrustDate: 合同签订日期（委托时间）。优先返回 YYYY-MM-DD；只有年月时返回 YYYY-MM；只有年份时返回 YYYY
+
+规则：
+1. 如果某个字段在文档中未找到，返回 null
+2. 金额统一返回纯数字（万元），不要带单位，不要返回千分位
+3. 只提取上述三个字段，不要提取甲方、乙方、联系人、工期等其它信息
+4. 只返回 JSON，不要任何解释文字
+
+请只返回 JSON，格式如下：
+{"projectName":"...","contractAmount":null,"entrustDate":"..."}
+
+文档内容：
 {{content}}`
 
   },
@@ -182,7 +205,8 @@ window.Extract = {
     win_notice: ['projectName', 'winUnit', 'winAmount', 'winNoticeDate', 'sealUnit', 'tenderUnit', 'segmentName'],
     win_public: ['projectName', 'publicDate', 'winUnit', 'segmentName'],
     evaluation: ['projectManager', 'techManager', 'otherMembers', 'evalDate', 'tenderUnit', 'contactInfo', 'segmentName'],
-    contract: ['contractName', 'entrustDate', 'projectManager', 'techManager', 'otherMembers', 'totalInvestment']
+    contract: ['contractName', 'entrustDate', 'projectManager', 'techManager', 'otherMembers', 'totalInvestment'],
+    cost_contract: ['projectName', 'contractAmount', 'entrustDate']
   },
 
   /** 字段合并优先级（数字越小优先级越高） */
@@ -190,6 +214,7 @@ window.Extract = {
     tender_doc: 1,
     win_notice: 2,
     contract: 3,
+    cost_contract: 3,
     tender_notice: 4,
     win_public: 5,
     evaluation: 6

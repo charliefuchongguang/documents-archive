@@ -40,7 +40,18 @@ const DOC_TYPE_LABELS = {
   approval: '批复',
   prequal_notice: '资格预审公告',
   prequal_doc: '资格预审文件',
-  prequal_review: '评审报告（资格预审）'
+  prequal_review: '评审报告（资格预审）',
+  cost_project_intake: '拟承接项目情况表',
+  cost_application: '委托咨询申请书',
+  cost_contract: '造价咨询合同',
+  cost_implementation: '实施项目情况表',
+  cost_task_book: '造价咨询项目任务书',
+  cost_raw_material: '造价咨询业务原始资料',
+  cost_result: '造价咨询成果文件',
+  cost_process: '造价咨询过程文件',
+  cost_evaluation: '造价咨询工作履约评价表',
+  cost_return_visit: '咨询工作回访记录',
+  cost_other_attach: '其它附件'
 };
 
 const MAX_ZIP_FILE_COUNT = 100;
