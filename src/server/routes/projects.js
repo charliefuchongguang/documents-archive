@@ -24,6 +24,9 @@ router.patch('/:id/master-project', requireAuth, projectController.changeMasterP
 // 获取项目详情
 router.get('/:id', projectController.getProject);
 
+// 试运行期人工修改项目编号（归档前，创建人/管理员）
+router.put('/:id/project-no', requireAuth, projectController.updateProjectNo);
+
 // 更新项目信息
 router.put('/:id', projectController.updateProject);
 

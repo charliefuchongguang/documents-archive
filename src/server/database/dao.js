@@ -145,6 +145,27 @@ function findProjectByNameInCategory(name, categoryId, excludeId) {
 }
 
 /**
+ * 按项目编号查找项目（用于试运行期人工改号查重）
+ * @param {string} projectNo
+ * @param {string} [excludeId]
+ * @returns {Object|undefined}
+ */
+function findProjectByProjectNo(projectNo, excludeId) {
+  const db = getDb();
+  if (!projectNo) return undefined;
+  if (excludeId) {
+    return db.prepare(`
+      SELECT id, name, project_no FROM projects
+      WHERE project_no = ? AND id != ?
+    `).get(projectNo, excludeId);
+  }
+  return db.prepare(`
+    SELECT id, name, project_no FROM projects
+    WHERE project_no = ?
+  `).get(projectNo);
+}
+
+/**
  * 获取项目详情
  * @param {string} id - 项目 ID
  * @returns {Object|undefined} 项目记录
@@ -1170,6 +1191,7 @@ module.exports = {
   getProjectCategoryCounts, countUnassignedProjects, updateProjectMaster,
   updateProject, deleteProject,
   findProjectByNameInCategory,
+  findProjectByProjectNo,
   isProjectOwner, canAccessProject, touchProjectUpdater, reassignProjectOwnership,
   createFile, getFile, getFilesByProject, getFilesByProjectAndSegment, getFilesForProjects, countFilesFromSegment, getFilesByIds,
   findDuplicateFile, updateFile, deleteFile, updateFileSegmentNo, resetPaperReviewedByProject,

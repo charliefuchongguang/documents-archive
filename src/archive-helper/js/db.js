@@ -50,6 +50,7 @@ function _mapProject(p) {
     paperReviewedAt: p.paper_reviewed_at || p.paperReviewedAt || '',
     paperReviewComment: p.paper_review_comment || p.paperReviewComment || '',
     archiveTemplate: p.archive_template || p.archiveTemplate || '',
+    archiveSeqNo: p.archive_seq_no != null ? p.archive_seq_no : (p.archiveSeqNo != null ? p.archiveSeqNo : ''),
     projectNo: p.project_no || p.projectNo || '',
     masterProjectId: p.master_project_id || p.masterProjectId || '',
     masterProjectName: p.master_project_name || p.masterProjectName || '',
@@ -97,7 +98,7 @@ window.DB = {
    * 创建新项目
    * @param {string} name - 项目名称
    * @param {string} [categoryCode='tender'] - 业务分类 code：tender | consult | cost
-   * @param {{ region?: string, procurementType?: string, masterProjectId?: string }} [options]
+   * @param {{ region?: string, procurementType?: string, masterProjectId?: string, projectNo?: string }} [options]
    * @returns {Promise<string>} 创建的项目ID
    */
   async createProject(name, categoryCode = 'tender', options = {}) {
@@ -106,7 +107,8 @@ window.DB = {
       categoryCode,
       region: options.region || '',
       procurementType: options.procurementType || 'G',
-      masterProjectId: options.masterProjectId || ''
+      masterProjectId: options.masterProjectId || '',
+      projectNo: options.projectNo || ''
     };
     const project = await Http.post('/projects', body);
     return _mapProject(project).projectId;
@@ -272,6 +274,17 @@ window.DB = {
     if (data.syncedAt !== undefined) mapped.synced_at = data.syncedAt;
     if (data.synced_at !== undefined) mapped.synced_at = data.synced_at;
     const result = await Http.put(`/projects/${projectId}`, mapped);
+    return _mapProject(result);
+  },
+
+  /**
+   * 试运行期修改项目编号（创建人/管理员，归档前）
+   * @param {string} projectId
+   * @param {string} projectNo
+   * @returns {Promise<Object>}
+   */
+  async updateProjectNo(projectId, projectNo) {
+    const result = await Http.put(`/projects/${projectId}/project-no`, { projectNo });
     return _mapProject(result);
   },
 

@@ -6,7 +6,8 @@
 /**
  * 造价咨询类归档文件类型
  * 依据《业务档案归档管理办法》第六条「造价咨询业务归档内容」
- * 仅造价咨询合同参与 AI 摘录（项目名称 + 合同金额），其余类型仅存储
+ * 合同、成果、原始资料、过程、评价、回访参与 AI 摘录；
+ * 拟承接/申请书/实施情况/任务书/其它附件仅存储
  */
 const COST_DOC_TYPES = {
   cost_project_intake: { label: '拟承接项目情况表', required: false, batchSelectable: false, storeOnly: true },
@@ -14,15 +15,53 @@ const COST_DOC_TYPES = {
   cost_contract: { label: '造价咨询合同', required: true },
   cost_implementation: { label: '实施项目情况表', required: false, batchSelectable: false, storeOnly: true },
   cost_task_book: { label: '造价咨询项目任务书', required: false, batchSelectable: false, storeOnly: true },
-  cost_raw_material: { label: '造价咨询业务原始资料', required: true, batchSelectable: false, storeOnly: true },
-  cost_result: { label: '造价咨询成果文件', required: true, batchSelectable: false, storeOnly: true },
-  cost_process: { label: '造价咨询过程文件', required: true, batchSelectable: false, storeOnly: true },
-  cost_evaluation: { label: '造价咨询工作履约评价表', required: true, batchSelectable: false, storeOnly: true },
-  cost_return_visit: { label: '咨询工作回访记录', required: true, batchSelectable: false, storeOnly: true },
+  cost_raw_material: { label: '造价咨询业务原始资料', required: true },
+  cost_result: { label: '造价咨询成果文件', required: true },
+  cost_process: { label: '造价咨询过程文件', required: true },
+  cost_evaluation: { label: '造价咨询工作履约评价表', required: true },
+  cost_return_visit: { label: '咨询工作回访记录', required: true },
   cost_other_attach: { label: '其它附件', required: false, batchSelectable: false, storeOnly: true }
 };
 
 const COST_DOC_TYPE_CODES = Object.keys(COST_DOC_TYPES);
+
+/** 造价项目统计表 A–P 列对应字段（Q 列及以后不使用） */
+const COST_FIELD_KEYS = [
+  'projectNo',
+  'projectName',
+  'industry',
+  'costServiceContent',
+  'costAmount',
+  'mileage',
+  'roadLevel',
+  'projectOverview',
+  'contractAmount',
+  'contractName',
+  'clientUnit',
+  'entrustDate',
+  'projectManager',
+  'techManager',
+  'otherMembers'
+];
+
+/** 造价项目字段展示名（对齐统计表 A–P 列） */
+const COST_FIELD_LABELS = {
+  projectNo: '编号',
+  projectName: '项目名称',
+  industry: '行业',
+  costServiceContent: '造价咨询内容',
+  costAmount: '造价金额（万元）',
+  mileage: '里程km',
+  roadLevel: '道路等级',
+  projectOverview: '项目概况',
+  contractAmount: '合同金额（万元）',
+  contractName: '合同名称',
+  clientUnit: '委托单位',
+  entrustDate: '合同日期',
+  projectManager: '项目负责人',
+  techManager: '技术负责人',
+  otherMembers: '其他人员'
+};
 
 window.Utils = {
 
@@ -83,6 +122,8 @@ window.Utils = {
 
   COST_DOC_TYPES,
   COST_DOC_TYPE_CODES,
+  COST_FIELD_KEYS,
+  COST_FIELD_LABELS,
 
   /**
    * 按业务分类取可上传的文档类型
@@ -160,11 +201,6 @@ window.Utils = {
       'cost_application',
       'cost_implementation',
       'cost_task_book',
-      'cost_raw_material',
-      'cost_result',
-      'cost_process',
-      'cost_evaluation',
-      'cost_return_visit',
       'cost_other_attach'
     ],
     get ALLOWED_EXTS() {
@@ -279,6 +315,9 @@ window.Utils = {
     { key: 'province', label: '项目所在省份', group: 'basic', type: 'text', required: true },
     { key: 'industry', label: '行业', group: 'basic', type: 'enum', enumKey: 'industry', required: true },
     { key: 'projectName', label: '招标项目名称', group: 'basic', type: 'text', required: true },
+    // 造价咨询项目专用：统计表 A–P 中的 E/F 列
+    { key: 'costServiceContent', label: '造价咨询内容', group: 'basic', type: 'text', required: false, costOnly: true },
+    { key: 'costAmount', label: '造价金额（万元）', group: 'basic', type: 'number', required: false, costOnly: true },
     { key: 'tenderType', label: '招标类型/招标内容', group: 'tender', type: 'enum', enumKey: 'tenderType', required: false },
     { key: 'tenderMethod', label: '招标/采购方式', group: 'tender', type: 'enum', enumKey: 'tenderMethod', required: false },
     { key: 'announceDate', label: '公告时间', group: 'tender', type: 'date', required: false },
@@ -291,10 +330,12 @@ window.Utils = {
     { key: 'totalInvestment', label: '项目总投资（万元）', group: 'overview', type: 'number', required: false },
     { key: 'projectOverview', label: '项目概况', group: 'overview', type: 'textarea', required: false },
     { key: 'contractName', label: '合同名称', group: 'contract', type: 'text', required: false },
+    // 造价咨询项目专用：统计表 L 列
+    { key: 'clientUnit', label: '委托单位', group: 'contract', type: 'text', required: false, costOnly: true },
     { key: 'entrustDate', label: '委托时间', group: 'contract', type: 'partialDate', required: false },
     { key: 'entrustAmount', label: '委托金额(万元)', group: 'contract', type: 'number', required: false },
     // 造价咨询项目专用：合同价款（万元）
-    { key: 'contractAmount', label: '合同金额（万元）', group: 'contract', type: 'number', required: false },
+    { key: 'contractAmount', label: '合同金额（万元）', group: 'contract', type: 'number', required: false, costOnly: true },
     { key: 'projectManager', label: '项目负责人', group: 'contract', type: 'text', required: false },
     { key: 'techManager', label: '技术负责人', group: 'contract', type: 'text', required: false },
     { key: 'otherMembers', label: '其他参与人员', group: 'contract', type: 'text', required: false },
