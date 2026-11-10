@@ -722,6 +722,7 @@ app.component('archive-project-create-dialog', {
     return {
       categoryCode: 'tender',
       projectName: '',
+      projectNo: '',
       masterProject: null,
       submitting: false,
       categoryOptions: [
@@ -740,6 +741,7 @@ app.component('archive-project-create-dialog', {
     resetForm() {
       this.categoryCode = this.defaultCategory || 'tender';
       this.projectName = '';
+      this.projectNo = '';
       this.masterProject = this.presetMasterProject ? { ...this.presetMasterProject } : null;
       this.submitting = false;
     },
@@ -753,10 +755,16 @@ app.component('archive-project-create-dialog', {
         ElMessage.warning('请输入归档项目名称');
         return;
       }
+      const projectNo = String(this.projectNo || '').trim();
+      if (this.categoryCode === 'cost' && projectNo.length > 60) {
+        ElMessage.warning('项目编号不能超过 60 个字符');
+        return;
+      }
       this.submitting = true;
       try {
         const projectId = await DB.createProject(name, this.categoryCode, {
-          masterProjectId: this.masterProject ? this.masterProject.id : ''
+          masterProjectId: this.masterProject ? this.masterProject.id : '',
+          projectNo
         });
         this.$emit('created', projectId);
         this.$emit('update:visible', false);
@@ -796,6 +804,14 @@ app.component('archive-project-create-dialog', {
         <div class="create-field">
           <div class="create-label"><i>*</i>归档项目名称</div>
           <el-input v-model="projectName" placeholder="如 施工监理招标" maxlength="200" show-word-limit />
+        </div>
+
+        <div v-if="categoryCode === 'cost'" class="create-field">
+          <div class="create-label">项目编号 <span class="create-optional">选填，提交审核前补填</span></div>
+          <el-input v-model="projectNo" placeholder="如 ZCC-Z26-BXJ-001" maxlength="60" show-word-limit />
+          <div class="create-hint">
+            试运行期造价编号由人工填写，也可创建后在详情页或复核页补填；归档后锁定。
+          </div>
         </div>
 
         <div class="create-field">
@@ -1974,19 +1990,21 @@ app.component('project-page', {
       if (!this.mergedResult) return [];
       const formData = this.mergedResult.formData || this.mergedResult;
       const fields = this.isCostProject
-        ? Utils.FIELDS.filter(f => ['projectName', 'contractAmount'].includes(f.key))
-        : Utils.FIELDS;
+        ? Utils.COST_FIELD_KEYS
+            .map(key => Utils.FIELDS.find(f => f.key === key))
+            .filter(Boolean)
+        : Utils.FIELDS.filter(f => !f.costOnly);
       return fields
         .filter(f => {
           const cell = formData[f.key];
           if (!cell) return false;
           return typeof cell === 'object' ? !!cell.value : !!cell;
         })
-        .slice(0, 8)
+        .slice(0, this.isCostProject ? 15 : 8)
         .map(f => {
           const cell = formData[f.key];
           return {
-            label: this.isCostProject && f.key === 'projectName' ? '项目名称' : f.label,
+            label: this.isCostProject ? (Utils.COST_FIELD_LABELS[f.key] || f.label) : f.label,
             value: typeof cell === 'object' ? cell.value : cell
           };
         });
@@ -2090,6 +2108,21 @@ app.component('project-page', {
       return this.isAdmin && !this.isLocked;
     },
     /**
+     * 项目编号是否可修改：归档前创建人/管理员
+     */
+    canEditProjectNo() {
+      if (!this.project || this.project.status === 'archived') return false;
+      return this.isAdmin || !!(this.currentUser && this.project.createdBy === this.currentUser.id);
+    },
+    /**
+     * 项目编号展示：造价项目未填写时提示待填写
+     */
+    projectNoDisplay() {
+      if (this.project && this.project.projectNo) return this.project.projectNo;
+      if (this.project && (this.project.categoryCode || '') === 'cost') return '待填写';
+      return '（历史项目，归档时分配）';
+    },
+    /**
      * 审核状态中文
      */
     reviewStatusLabel() {
@@ -2139,7 +2172,7 @@ app.component('project-page', {
       return !this.project || (this.project.categoryCode || 'tender') === 'tender';
     },
     /**
-     * 是否造价咨询类项目（仅摘录项目名称与合同金额）
+     * 是否造价咨询类项目（按造价统计表 A–P 列展示）
      */
     isCostProject() {
       return !!(this.project && (this.project.categoryCode || '') === 'cost');
@@ -2521,6 +2554,48 @@ app.component('project-page', {
       }
       this.editingName = false;
       ElMessage.success('名称已更新');
+    },
+    /**
+     * 试运行期修改项目编号（归档前创建人/管理员）
+     */
+    async editProjectNo() {
+      if (!this.canEditProjectNo) {
+        ElMessage.warning('当前状态无权修改项目编号');
+        return;
+      }
+      const isCost = (this.project && this.project.categoryCode) === 'cost';
+      const tip = isCost
+        ? '请输入造价项目编号，如 ZCC-Z26-BXJ-001。试运行期间可修改，归档后锁定。'
+        : '请输入项目编号，如 ZEC-Z26G-050。试运行期间可修改，归档后锁定。';
+      try {
+        const { value } = await ElMessageBox.prompt(tip, '修改项目编号', {
+          inputValue: (this.project && this.project.projectNo) || '',
+          confirmButtonText: '保存',
+          cancelButtonText: '取消',
+          inputValidator: (v) => {
+            const s = String(v || '').trim();
+            if (!s) return '项目编号不能为空';
+            if (s.length > 60) return '项目编号不能超过 60 个字符';
+            return true;
+          }
+        });
+        const updated = await DB.updateProjectNo(this.projectId, String(value || '').trim());
+        this.project = { ...this.project, ...updated };
+        if (this.mergedResult) {
+          const formData = this.mergedResult.formData || {};
+          const cell = formData.projectNo;
+          if (cell && typeof cell === 'object' && 'value' in cell) {
+            cell.value = updated.projectNo;
+          } else {
+            formData.projectNo = updated.projectNo;
+          }
+        }
+        ElMessage.success('项目编号已更新');
+      } catch (error) {
+        if (error !== 'cancel' && error !== 'close') {
+          ElMessage.error(error.message || '修改项目编号失败');
+        }
+      }
     },
     /**
      * 处理文件上传（支持多文件选择，PDF → 后端异步队列处理）
@@ -3743,7 +3818,9 @@ app.component('project-page', {
                 :size="hasAssignedProjectNo ? 'default' : 'small'"
                 :type="hasAssignedProjectNo ? undefined : 'success'"
                 :class="{ 'project-no-tag--assigned': hasAssignedProjectNo }"
-              >{{ hasAssignedProjectNo ? project.projectNo : '（历史项目，归档时分配）' }}</el-tag>
+              >{{ projectNoDisplay }}</el-tag>
+              <el-button v-if="canEditProjectNo" text size="small" @click="editProjectNo">修改</el-button>
+              <el-tag v-else-if="isArchived" size="small" type="info">已锁定</el-tag>
             </div>
 
             <div style="width: 100%; display: flex; align-items: center; gap: 8px;">
@@ -4450,28 +4527,46 @@ app.component('review-page', {
   },
   computed: {
     /**
-     * 是否造价咨询类项目（仅展示项目名称、合同金额）
+     * 是否造价咨询类项目（按统计表 A–P 列展示）
      */
     isCostProject() {
       return !!(this.project && (this.project.categoryCode || '') === 'cost');
     },
     /**
+     * 造价项目序号：归档后显示归档序号，未归档显示提示
+     */
+    costSeqDisplay() {
+      if (this.project && this.project.archiveSeqNo) return String(this.project.archiveSeqNo);
+      return '归档后生成';
+    },
+    /**
      * 当前项目复核页展示的字段
-     * 造价咨询类仅保留项目名称、合同金额
+     * 造价咨询类按统计表 A–P 列展示
      */
     reviewFields() {
-      if (!this.isCostProject) return Utils.FIELDS.filter(f => f.key !== 'contractAmount');
-      return Utils.FIELDS
-        .filter(f => ['projectName', 'contractAmount'].includes(f.key))
-        .map(f => (f.key === 'projectName' ? { ...f, label: '项目名称' } : f));
+      if (!this.isCostProject) return Utils.FIELDS.filter(f => !f.costOnly);
+      const byKey = new Map(Utils.FIELDS.map(f => [f.key, f]));
+      return Utils.COST_FIELD_KEYS
+        .map(key => byKey.get(key))
+        .filter(Boolean)
+        .map(f => {
+          const out = { ...f, label: Utils.COST_FIELD_LABELS[f.key] || f.label };
+          if (f.key === 'industry' || f.key === 'roadLevel') out.allowCreate = true;
+          if (f.key === 'mileage' || f.key === 'roadLevel') out.group = 'overview';
+          if (f.key === 'projectNo') out.required = false;
+          return out;
+        });
     },
     /**
      * 字段分组列表
      */
     fieldGroups() {
-      return Utils.FIELD_GROUPS.filter((g) =>
-        this.reviewFields.some((f) => f.group === g.key && (this.isCostProject || !SEGMENT_FIELDS.includes(f.key)))
-      );
+      const costLabels = { basic: '项目信息', overview: '项目概况', contract: '合同信息' };
+      return Utils.FIELD_GROUPS
+        .filter((g) =>
+          this.reviewFields.some((f) => f.group === g.key && (this.isCostProject || !SEGMENT_FIELDS.includes(f.key)))
+        )
+        .map(g => (this.isCostProject && costLabels[g.key] ? { ...g, label: costLabels[g.key] } : g));
     },
     /**
      * 所有字段定义
@@ -4539,6 +4634,14 @@ app.component('review-page', {
       const u = this.currentUser;
       return !!(u && (u.role === 'admin' || u.roleCode === 'admin'));
     },
+    /**
+     * 项目编号是否可修改：归档前创建人/管理员
+     */
+    canEditProjectNo() {
+      if (!this.project || this.project.status === 'archived') return false;
+      const u = this.currentUser;
+      return this.isAdmin || !!(u && this.project.createdBy === u.id);
+    },
     showAdminReviewPanel() {
       return this.isAdmin && this.project && this.project.status === 'pending_review';
     },
@@ -4570,6 +4673,7 @@ app.component('review-page', {
       if (this.project && this.project.status === 'archived' && this.formData && this.formData.projectNo) {
         return this.formData.projectNo;
       }
+      if (this.isCostProject) return '待填写';
       return '提交归档后自动分配';
     },
     /**
@@ -4845,7 +4949,7 @@ app.component('review-page', {
      * @returns {boolean}
      */
     hasInvalidDates() {
-      if (!this.isCostProject && this.formData.entrustDate && !Utils.isValidPartialDate(this.formData.entrustDate)) {
+      if (this.formData.entrustDate && !Utils.isValidPartialDate(this.formData.entrustDate)) {
         return true;
       }
       if (this.isCostProject) return false;
@@ -5213,6 +5317,40 @@ app.component('review-page', {
     },
 
     /**
+     * 试运行期修改项目编号（归档前创建人/管理员）
+     */
+    async editProjectNo() {
+      if (!this.canEditProjectNo) {
+        ElMessage.warning('当前状态无权修改项目编号');
+        return;
+      }
+      const tip = this.isCostProject
+        ? '请输入造价项目编号，如 ZCC-Z26-BXJ-001。试运行期间可修改，归档后锁定。'
+        : '请输入项目编号，如 ZEC-Z26G-050。试运行期间可修改，归档后锁定。';
+      try {
+        const { value } = await ElMessageBox.prompt(tip, '修改项目编号', {
+          inputValue: (this.project && this.project.projectNo) || '',
+          confirmButtonText: '保存',
+          cancelButtonText: '取消',
+          inputValidator: (v) => {
+            const s = String(v || '').trim();
+            if (!s) return '项目编号不能为空';
+            if (s.length > 60) return '项目编号不能超过 60 个字符';
+            return true;
+          }
+        });
+        const updated = await DB.updateProjectNo(this.projectId, String(value || '').trim());
+        this.project = { ...this.project, ...updated };
+        this.formData.projectNo = updated.projectNo || '';
+        ElMessage.success('项目编号已更新');
+      } catch (error) {
+        if (error !== 'cancel' && error !== 'close') {
+          ElMessage.error(error.message || '修改项目编号失败');
+        }
+      }
+    },
+
+    /**
      * 提交审核
      */
     async submitForReview() {
@@ -5228,6 +5366,10 @@ app.component('review-page', {
         }
         if (!String(this.formData.projectName || '').trim()) {
           ElMessage.warning('请填写项目名称');
+          return;
+        }
+        if (!String(this.project && this.project.projectNo || '').trim()) {
+          ElMessage.warning('请先填写造价项目编号，再提交审核');
           return;
         }
       } else {
@@ -5396,6 +5538,19 @@ app.component('review-page', {
 
       <!-- 表单主体 -->
       <div class="review-form" v-if="!loading">
+        <el-form
+          v-if="isCostProject"
+          label-position="left"
+          label-width="140px"
+          style="padding: 0 20px 8px;"
+        >
+          <el-form-item label="序号">
+            <el-input :model-value="costSeqDisplay" disabled style="max-width: 320px;" />
+          </el-form-item>
+          <div style="margin: -8px 0 8px; font-size: 12px; color: #909399;">
+            以下字段对应《公司造价咨询项目资料归档统计表》A–P 列（Q 列及以后不进入系统）。
+          </div>
+        </el-form>
 
         <!-- 共享字段 + 各标段卡片（单/多标段统一布局） -->
         <div>
@@ -5414,7 +5569,11 @@ app.component('review-page', {
                       'field-missing': !formData[field.key] && !fieldMeta[field.key]?.conflict
                     }">
                       <template v-if="field.key === 'projectNo'">
-                        <el-input :model-value="displayProjectNo" disabled />
+                        <div style="display: flex; align-items: center; gap: 8px; width: 100%;">
+                          <el-input :model-value="displayProjectNo" disabled style="flex: 1;" />
+                          <el-button v-if="canEditProjectNo" size="small" @click="editProjectNo">修改编号</el-button>
+                          <el-tag v-else-if="project && project.status === 'archived'" size="small" type="info">已锁定</el-tag>
+                        </div>
                       </template>
 
                       <el-autocomplete
@@ -5467,6 +5626,9 @@ app.component('review-page', {
 
                       <span v-if="fieldMeta[field.key]?.source" class="field-source">
                         来自：{{ getSourceLabel(fieldMeta[field.key].source) }}
+                      </span>
+                      <span v-if="isCostProject && field.key === 'costAmount'" class="field-source">
+                        多个清单/合同段请手工汇总
                       </span>
                     </div>
 

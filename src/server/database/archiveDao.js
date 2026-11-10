@@ -137,6 +137,75 @@ function generateProjectNo(year, procurementType) {
   return `ZEC-Z${year}${type}-${seq.toString().padStart(3, '0')}`;
 }
 
+/**
+ * 手工编号后抬高年度流水，避免后续自动编号重号
+ * @param {string} year - 两位年份
+ * @param {number} seq - 已使用的三位流水
+ */
+function ensureProjectNoSeqAtLeast(year, seq) {
+  const db = getDb();
+  if (!year || !Number.isFinite(seq) || seq <= 0) return;
+  const row = db.prepare('SELECT current_seq FROM project_no_seq WHERE year = ?').get(year);
+  if (row) {
+    if (row.current_seq < seq) {
+      db.prepare('UPDATE project_no_seq SET current_seq = ? WHERE year = ?').run(seq, year);
+    }
+  } else {
+    db.prepare('INSERT INTO project_no_seq (year, current_seq) VALUES (?, ?)').run(year, seq);
+  }
+}
+
+/**
+ * 检查归档表中是否已有相同项目编号（排除当前项目）
+ * @param {string} projectNo
+ * @param {string} excludeProjectId
+ * @returns {Object|undefined}
+ */
+function findProjectNoConflict(projectNo, excludeProjectId) {
+  const db = getDb();
+  if (!projectNo) return undefined;
+  if (excludeProjectId) {
+    return db.prepare(`
+      SELECT project_id, project_name, project_no FROM archives
+      WHERE project_no = ? AND project_id != ?
+      LIMIT 1
+    `).get(projectNo, excludeProjectId);
+  }
+  return db.prepare(`
+    SELECT project_id, project_name, project_no FROM archives
+    WHERE project_no = ?
+    LIMIT 1
+  `).get(projectNo);
+}
+
+/**
+ * 试运行期人工改号：同步更新归档记录列与 form_data.projectNo
+ * @param {string} projectId
+ * @param {string} projectNo
+ */
+function updateProjectNumber(projectId, projectNo) {
+  const db = getDb();
+  const rows = db.prepare('SELECT seq_no, form_data FROM archives WHERE project_id = ?').all(projectId);
+  if (!rows.length) return;
+
+  const update = db.prepare('UPDATE archives SET project_no = ?, form_data = ? WHERE seq_no = ?');
+  const tx = db.transaction(() => {
+    for (const row of rows) {
+      let formData = {};
+      try {
+        formData = row.form_data
+          ? (typeof row.form_data === 'string' ? JSON.parse(row.form_data) : row.form_data)
+          : {};
+      } catch {
+        formData = {};
+      }
+      formData.projectNo = projectNo;
+      update.run(projectNo, JSON.stringify(formData), row.seq_no);
+    }
+  });
+  tx();
+}
+
 // ==================== 归档操作 ====================
 
 /**
@@ -360,5 +429,8 @@ module.exports = {
   getArchives,
   getAllArchivesForExport,
   removeArchive,
-  generateProjectNo
+  generateProjectNo,
+  ensureProjectNoSeqAtLeast,
+  findProjectNoConflict,
+  updateProjectNumber
 };

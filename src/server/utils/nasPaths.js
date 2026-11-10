@@ -583,6 +583,9 @@ function validateArchiveNasReadiness(
 
   let year = null;
   if (isCostConsultProject(project, mergedFormData)) {
+    if (!String(project?.project_no || '').trim()) {
+      errors.push('造价项目编号未填写');
+    }
     // 造价咨询项目无中标通知书，归档年度取合同签订日期/创建年度
     year = resolveCostArchiveYear(project, mergedFormData);
   } else {

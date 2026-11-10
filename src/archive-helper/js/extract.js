@@ -172,24 +172,153 @@ window.Extract = {
 {{content}}`,
 
     /**
-     * 造价咨询合同 — 仅摘录项目名称、合同金额
-     * entrustDate 供归档年度使用，不在造价复核页展示
+     * 造价咨询合同 — 提取统计表 C/D/E/J/K/L/M/N/O/P
      */
     cost_contract: `你是专业的造价咨询合同信息提取助手。请从以下造价咨询合同的 Markdown 内容中提取指定字段，并以严格的 JSON 格式返回。
 
 需要提取的字段：
-- projectName: 项目名称，即本合同对应的建设项目/委托项目名称（如「XX收费站改扩建工程施工项目限价编制」）。必须是项目本身名称，禁止返回「造价咨询合同」「咨询合同」等文件名或合同类型名称
+- projectName: 项目名称，即本合同对应的建设项目/委托项目名称。必须是项目本身名称，禁止返回「造价咨询合同」「咨询合同」等文件名或合同类型名称
+- industry: 行业，优先保留文档原文（如「公路工程」「市政工程」「铁路工程」「房建工程」），不要强行归并为「公路」等短词
+- costServiceContent: 造价咨询内容/咨询类别/服务范围，如「限价编制」「工程量清单及招标控制价编制」「竣工结算审计」
+- contractName: 合同名称
 - contractAmount: 合同金额，取合同价款/咨询酬金/咨询服务费的含税总额，返回纯数字（万元）。文档金额单位为元时除以 10000
+- clientUnit: 委托单位，即合同甲方/委托人/建设单位名称，填写原文
 - entrustDate: 合同签订日期（委托时间）。优先返回 YYYY-MM-DD；只有年月时返回 YYYY-MM；只有年份时返回 YYYY
+- projectManager: 合同载明的项目负责人姓名
+- techManager: 合同载明的技术负责人姓名
+- otherMembers: 合同载明的其他参与人员姓名（多人用顿号、逗号分隔）
+- mileage: 项目里程，仅当合同明确载明时返回，保留原文（含起讫桩号）
+- roadLevel: 道路等级，仅当合同明确载明时返回，保留原文（如「高速公路」「一级公路」「二级公路」）
+- projectOverview: 项目概况，仅当合同明确载明时返回，保留原文
 
 规则：
 1. 如果某个字段在文档中未找到，返回 null
 2. 金额统一返回纯数字（万元），不要带单位，不要返回千分位
-3. 只提取上述三个字段，不要提取甲方、乙方、联系人、工期等其它信息
+3. 行业、道路等级、里程尽量保留文档原文，不要自行改写
+4. 不要提取乙方、联系人、工期等统计表不需要的信息
+5. 只返回 JSON，不要任何解释文字
+
+请只返回 JSON，格式如下：
+{"projectName":"...","industry":"...","costServiceContent":"...","contractName":"...","contractAmount":null,"clientUnit":"...","entrustDate":"...","projectManager":"...","techManager":"...","otherMembers":"...","mileage":null,"roadLevel":null,"projectOverview":null}
+
+文档内容：
+{{content}}`,
+
+    /**
+     * 造价咨询成果文件/限价说明/清单 — 提取统计表 C/D/E/F/G/H/I
+     */
+    cost_result: `你是专业的造价咨询成果文件信息提取助手。请从以下造价咨询成果文件、限价说明或工程量清单的 Markdown 内容中提取指定字段，并以严格的 JSON 格式返回。
+
+需要提取的字段：
+- projectName: 项目名称，即本成果文件对应的建设项目名称
+- industry: 行业，优先保留文档原文（如「公路工程」「市政工程」「铁路工程」「房建工程」），不要强行归并为「公路」等短词
+- costServiceContent: 造价咨询内容/咨询类别/服务范围，如「限价编制」「工程量清单编制」「预算复核」
+- costAmount: 造价金额（万元），取成果文件中的最高限价、招标控制价、预算造价、清单合计或工程造价总额，返回纯数字（万元）。如文档按标段/合同段分别列示，请汇总为项目总造价；禁止取合同金额、咨询费、代理费、中标金额
+- mileage: 项目里程，保留原文（含起讫桩号）
+- roadLevel: 道路等级，保留原文（如「高速公路」「一级公路」「二级公路」「三级公路」「市政道路」）
+- projectOverview: 项目概况，保留原文长文本，重点保留桥梁、隧道等特殊信息
+
+规则：
+1. 如果某个字段在文档中未找到，返回 null
+2. 金额统一返回纯数字（万元），不要带单位，不要返回千分位
+3. 行业、道路等级、里程尽量保留文档原文，不要自行改写
 4. 只返回 JSON，不要任何解释文字
 
 请只返回 JSON，格式如下：
-{"projectName":"...","contractAmount":null,"entrustDate":"..."}
+{"projectName":"...","industry":"...","costServiceContent":"...","costAmount":null,"mileage":"...","roadLevel":"...","projectOverview":"..."}
+
+文档内容：
+{{content}}`,
+
+    /**
+     * 造价咨询业务原始资料 — 补充项目概况与造价金额
+     */
+    cost_raw_material: `你是专业的造价项目资料信息提取助手。请从以下造价咨询业务原始资料（招标文件、技术规范、工程量清单、设计文件、材料价格等）的 Markdown 内容中提取指定字段，并以严格的 JSON 格式返回。
+
+需要提取的字段：
+- projectName: 项目名称
+- industry: 行业，优先保留文档原文
+- costServiceContent: 造价咨询内容/咨询类别/服务范围
+- costAmount: 造价金额（万元）。仅当文档明确写明「最高限价」「招标控制价」「概算」「预算总额」「清单合计」等造价成果金额时提取；原始资料中的合同价、投标报价、材料单价不得作为造价金额；未明确时返回 null
+- mileage: 项目里程，保留原文（含起讫桩号）
+- roadLevel: 道路等级，保留原文
+- projectOverview: 项目概况，保留原文长文本
+
+规则：
+1. 如果某个字段在文档中未找到，返回 null
+2. 金额统一返回纯数字（万元），不要带单位，不要返回千分位
+3. 只返回 JSON，不要任何解释文字
+
+请只返回 JSON，格式如下：
+{"projectName":"...","industry":"...","costServiceContent":"...","costAmount":null,"mileage":"...","roadLevel":"...","projectOverview":"..."}
+
+文档内容：
+{{content}}`,
+
+    /**
+     * 造价咨询过程文件（质量控制记录表等） — 补充内容与人员
+     */
+    cost_process: `你是专业的造价咨询过程文件信息提取助手。请从以下造价咨询过程文件（质量控制记录表、编制/校审记录等）的 Markdown 内容中提取指定字段，并以严格的 JSON 格式返回。
+
+需要提取的字段：
+- projectName: 项目名称
+- industry: 行业，优先保留文档原文
+- costServiceContent: 造价咨询内容/咨询类别/服务范围（如「工程量清单及限价编制」）
+- clientUnit: 委托单位，填写原文
+- projectManager: 项目负责人姓名
+- techManager: 技术负责人姓名。优先取校核人/审核人/复核人，排除项目负责人
+- otherMembers: 其他参与人员姓名（编制人及其他参与人员，排除项目负责人和技术负责人；多人用顿号、逗号分隔）
+
+规则：
+1. 如果某个字段在文档中未找到，返回 null
+2. 人员姓名只填姓名，不要附加职务说明
+3. 只返回 JSON，不要任何解释文字
+
+请只返回 JSON，格式如下：
+{"projectName":"...","industry":"...","costServiceContent":"...","clientUnit":"...","projectManager":"...","techManager":"...","otherMembers":"..."}
+
+文档内容：
+{{content}}`,
+
+    /**
+     * 造价咨询履约评价 — 补充人员与委托单位
+     */
+    cost_evaluation: `你是专业的造价咨询履约评价信息提取助手。请从以下造价咨询工作履约评价表的 Markdown 内容中提取指定字段，并以严格的 JSON 格式返回。
+
+需要提取的字段：
+- projectName: 项目名称
+- costServiceContent: 造价咨询内容/咨询类别
+- clientUnit: 委托单位，填写原文
+- projectManager: 项目负责人姓名
+- techManager: 技术负责人姓名
+- otherMembers: 其他参与人员姓名（多人用顿号、逗号分隔）
+
+规则：
+1. 如果某个字段在文档中未找到，返回 null
+2. 只返回 JSON，不要任何解释文字
+
+请只返回 JSON，格式如下：
+{"projectName":"...","costServiceContent":"...","clientUnit":"...","projectManager":"...","techManager":"...","otherMembers":"..."}
+
+文档内容：
+{{content}}`,
+
+    /**
+     * 咨询工作回访记录 — 补充项目名称、咨询内容与委托单位
+     */
+    cost_return_visit: `你是专业的造价咨询回访记录信息提取助手。请从以下咨询工作回访记录的 Markdown 内容中提取指定字段，并以严格的 JSON 格式返回。
+
+需要提取的字段：
+- projectName: 项目名称
+- costServiceContent: 造价咨询内容/咨询类别
+- clientUnit: 委托单位，填写原文
+
+规则：
+1. 如果某个字段在文档中未找到，返回 null
+2. 只返回 JSON，不要任何解释文字
+
+请只返回 JSON，格式如下：
+{"projectName":"...","costServiceContent":"...","clientUnit":"..."}
 
 文档内容：
 {{content}}`
@@ -206,7 +335,12 @@ window.Extract = {
     win_public: ['projectName', 'publicDate', 'winUnit', 'segmentName'],
     evaluation: ['projectManager', 'techManager', 'otherMembers', 'evalDate', 'tenderUnit', 'contactInfo', 'segmentName'],
     contract: ['contractName', 'entrustDate', 'projectManager', 'techManager', 'otherMembers', 'totalInvestment'],
-    cost_contract: ['projectName', 'contractAmount', 'entrustDate']
+    cost_contract: ['projectName', 'industry', 'costServiceContent', 'contractName', 'contractAmount', 'clientUnit', 'entrustDate', 'projectManager', 'techManager', 'otherMembers', 'mileage', 'roadLevel', 'projectOverview'],
+    cost_result: ['projectName', 'industry', 'costServiceContent', 'costAmount', 'mileage', 'roadLevel', 'projectOverview'],
+    cost_raw_material: ['projectName', 'industry', 'costServiceContent', 'costAmount', 'mileage', 'roadLevel', 'projectOverview'],
+    cost_process: ['projectName', 'industry', 'costServiceContent', 'clientUnit', 'projectManager', 'techManager', 'otherMembers'],
+    cost_evaluation: ['projectName', 'costServiceContent', 'clientUnit', 'projectManager', 'techManager', 'otherMembers'],
+    cost_return_visit: ['projectName', 'costServiceContent', 'clientUnit']
   },
 
   /** 字段合并优先级（数字越小优先级越高） */
@@ -214,7 +348,12 @@ window.Extract = {
     tender_doc: 1,
     win_notice: 2,
     contract: 3,
-    cost_contract: 3,
+    cost_contract: 1,
+    cost_result: 2,
+    cost_raw_material: 3,
+    cost_process: 4,
+    cost_evaluation: 5,
+    cost_return_visit: 6,
     tender_notice: 4,
     win_public: 5,
     evaluation: 6
@@ -233,7 +372,22 @@ window.Extract = {
   FIELD_SOURCE_PRIORITY: {
     tenderUnit: { evaluation: 1, tender_doc: 2, win_notice: 3, contract: 4, tender_notice: 5, win_public: 6 },
     contactInfo: { evaluation: 1, tender_doc: 2, win_notice: 3, contract: 4, tender_notice: 5, win_public: 6 },
-    evalDate: { evaluation: 1 }
+    evalDate: { evaluation: 1 },
+    // 造价咨询：合同负责合同类字段，成果文件负责造价/概况类字段
+    projectName: { cost_contract: 1, cost_result: 2, cost_return_visit: 3, cost_process: 4, cost_evaluation: 5 },
+    industry: { cost_result: 1, cost_raw_material: 2, cost_contract: 3, cost_process: 4 },
+    costServiceContent: { cost_contract: 1, cost_process: 2, cost_return_visit: 3, cost_result: 4, cost_evaluation: 5 },
+    costAmount: { cost_result: 1, cost_raw_material: 2 },
+    mileage: { cost_result: 1, cost_raw_material: 2, cost_contract: 3 },
+    roadLevel: { cost_result: 1, cost_raw_material: 2, cost_contract: 3 },
+    projectOverview: { cost_result: 1, cost_raw_material: 2, cost_contract: 3 },
+    contractName: { cost_contract: 1 },
+    contractAmount: { cost_contract: 1 },
+    clientUnit: { cost_contract: 1, cost_process: 2, cost_evaluation: 3, cost_return_visit: 4 },
+    entrustDate: { cost_contract: 1 },
+    projectManager: { cost_contract: 1, cost_process: 2, cost_evaluation: 3 },
+    techManager: { cost_contract: 1, cost_process: 2, cost_evaluation: 3 },
+    otherMembers: { cost_contract: 1, cost_process: 2, cost_evaluation: 3 }
   },
 
   /**
@@ -252,7 +406,7 @@ window.Extract = {
 
   /**
    * 从单份文档中提取结构化信息
-   * @param {string} docType - 文档类型（tender_notice / tender_doc / win_notice / win_public / evaluation / contract）
+   * @param {string} docType - 文档类型（tender_notice / tender_doc / win_notice / win_public / evaluation / contract / cost_*）
    * @param {string} content - 文档 Markdown 内容
    * @returns {Promise<Object>} 提取结果 JSON 对象
    */
@@ -322,9 +476,11 @@ window.Extract = {
    */
   async mergeExtractedData(projectId, options = {}) {
     const preferExtracted = options.preferExtracted === true;
+    let projectInfo = null;
     // 已归档：优先读库中已落库的合并结果，不写回
     try {
       const project = await window.DB.getProject(projectId);
+      projectInfo = project || null;
       if (project && ['archived', 'pending_review', 'pending_paper'].includes(project.status)) {
         return this.loadArchivedMergedData(projectId);
       }
@@ -360,8 +516,11 @@ window.Extract = {
     const winNoticeFiles = extractedFiles.filter(f => f.docType === 'win_notice');
     const winPublicFiles = extractedFiles.filter(f => f.docType === 'win_public');
     const segmentFiles = [...winNoticeFiles, ...winPublicFiles];
-    const hasMultipleSegments = projectSegments.length > 1
-      || segmentFiles.some(f => f.segmentNo && f.segmentNo > 0);
+    const isCostProject = !!(projectInfo && (projectInfo.categoryCode || projectInfo.category_code) === 'cost');
+    const hasMultipleSegments = !isCostProject && (
+      projectSegments.length > 1
+      || segmentFiles.some(f => f.segmentNo && f.segmentNo > 0)
+    );
 
     // 4. 收集各标段字段：所有带标段号的文件都参与（中标通知书/公示/履约评价等）
     const segmentData = {};

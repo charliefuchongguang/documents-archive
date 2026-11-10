@@ -19,6 +19,7 @@ const {
 const { respondIfProjectLocked, STATUS } = require('../utils/projectStatus');
 const nasArchive = require('../services/nasArchive');
 const archiveTemplates = require('../config/archiveTemplates');
+const archiveDao = require('../database/archiveDao');
 
 /**
  * 加载项目并校验访问权限，失败时已写响应
@@ -264,8 +265,8 @@ function listProjectCategories(req, res) {
 /**
  * 创建新项目
  * POST /api/projects
- * Body: { name, categoryId?, categoryCode?, region, procurementType }
- * 创建时校验同分类同名、必选地域，并立即生成项目编号
+ * Body: { name, categoryId?, categoryCode?, region, procurementType, projectNo? }
+ * 招标项目创建时自动生成编号；造价项目按试运行要求手填，留空则待补。
  */
 function createProject(req, res) {
   try {
@@ -273,6 +274,9 @@ function createProject(req, res) {
     const region = String(req.body.region || '').trim();
     const procurementType = String(req.body.procurementType || req.body.procurement_type || 'G').trim().toUpperCase();
     const masterProjectId = String(req.body.masterProjectId || req.body.master_project_id || '').trim();
+    const requestedProjectNo = String(
+      req.body.projectNo !== undefined ? req.body.projectNo : (req.body.project_no || '')
+    ).trim();
     const { categoryId, categoryCode } = req.body;
 
     if (!name) return res.status(400).json({ error: '项目名称不能为空' });
@@ -300,9 +304,27 @@ function createProject(req, res) {
       }
     }
 
-    const archiveDao = require('../database/archiveDao');
-    const projectNoYear = new Date().getFullYear().toString().slice(-2);
-    const projectNo = archiveDao.generateProjectNo(projectNoYear, procurementType);
+    let projectNo = '';
+    if (resolved.category.code === 'cost') {
+      // 造价项目暂不自动生成 ZCC 编号，试运行期手填/后续补填
+      projectNo = requestedProjectNo;
+      if (projectNo) {
+        const dup = dao.findProjectByProjectNo(projectNo);
+        if (dup) {
+          return res.status(409).json({ error: `项目编号已存在：${dup.name || projectNo}` });
+        }
+        const archiveDup = archiveDao.findProjectNoConflict(projectNo);
+        if (archiveDup) {
+          return res.status(409).json({ error: `项目编号已存在：${archiveDup.project_name || projectNo}` });
+        }
+        if (projectNo.length > 60) {
+          return res.status(400).json({ error: '项目编号不能超过 60 个字符' });
+        }
+      }
+    } else {
+      const projectNoYear = new Date().getFullYear().toString().slice(-2);
+      projectNo = archiveDao.generateProjectNo(projectNoYear, procurementType);
+    }
 
     const user = userMgmtDao.getUserWithRelations(userId);
     const id = crypto.randomUUID();
@@ -335,6 +357,13 @@ function getProject(req, res) {
     const project = requireAccessibleProject(req, res, req.params.id);
     if (!project) return;
     const enriched = dao.getProjectWithDepartment(req.params.id) || project;
+    // 造价统计表 A 列：已归档项目返回归档序号
+    try {
+      const archive = archiveDao.getArchive(req.params.id);
+      if (archive) enriched.archive_seq_no = archive.seq_no;
+    } catch {
+      /* 归档表尚未创建时忽略 */
+    }
     res.json(enriched);
   } catch (error) {
     console.error('[项目详情] 查询失败:', error.message);
@@ -398,6 +427,112 @@ function updateProject(req, res) {
     if (error && /UNIQUE|unique/i.test(String(error.message))) {
       return res.status(409).json({ error: '同分类下已存在同名项目，请修改项目名称' });
     }
+    res.status(500).json({ error: error.message });
+  }
+}
+
+/**
+ * 同步 merged_data 中的项目编号（含标段表单）
+ * @param {string} projectId
+ * @param {string} projectNo
+ */
+function syncMergedProjectNo(projectId, projectNo) {
+  const merged = dao.getMergedData(projectId);
+  if (!merged) return;
+
+  let baseFormData = {};
+  if (merged.form_data && typeof merged.form_data === 'object') {
+    baseFormData = { ...merged.form_data };
+  } else if (typeof merged.form_data === 'string') {
+    try {
+      const parsed = JSON.parse(merged.form_data);
+      if (parsed && typeof parsed === 'object') baseFormData = parsed;
+    } catch {
+      baseFormData = {};
+    }
+  }
+  const formData = { ...baseFormData, projectNo };
+
+  let segmentFormData = merged.segment_form_data;
+  if (Array.isArray(segmentFormData)) {
+    segmentFormData = segmentFormData.map((item) => {
+      if (!item || typeof item !== 'object') return item;
+      if (item.formData && typeof item.formData === 'object') {
+        return { ...item, formData: { ...item.formData, projectNo } };
+      }
+      return { ...item, projectNo };
+    });
+  }
+
+  dao.saveMergedData({
+    projectId,
+    formData,
+    conflicts: merged.conflicts || {},
+    segmentFormData
+  });
+}
+
+/**
+ * 试运行期人工修改项目编号
+ * PUT /api/projects/:id/project-no
+ * Body: { projectNo }
+ * 允许创建人/管理员在归档前修改；归档后锁定。
+ */
+function updateProjectNo(req, res) {
+  try {
+    const userId = req.user?.userid;
+    if (!userId) return res.status(401).json({ error: '未登录' });
+
+    const project = requireAccessibleProject(req, res, req.params.id);
+    if (!project) return;
+
+    const isAdmin = userMgmtDao.isUserAdmin(userId);
+    if (!isAdmin && project.created_by !== userId) {
+      return res.status(403).json({ error: '仅创建人或管理员可修改项目编号' });
+    }
+    if (project.status === STATUS.ARCHIVED) {
+      return res.status(409).json({ error: '已归档项目编号不可修改' });
+    }
+
+    const raw = req.body?.projectNo !== undefined ? req.body.projectNo : req.body?.project_no;
+    const projectNo = String(raw == null ? '' : raw).trim();
+    if (!projectNo) return res.status(400).json({ error: '项目编号不能为空' });
+    if (projectNo.length > 60) return res.status(400).json({ error: '项目编号不能超过 60 个字符' });
+
+    const dup = dao.findProjectByProjectNo(projectNo, project.id);
+    if (dup) {
+      return res.status(409).json({ error: `项目编号已存在：${dup.name || projectNo}` });
+    }
+    const archiveDup = archiveDao.findProjectNoConflict(projectNo, project.id);
+    if (archiveDup) {
+      return res.status(409).json({ error: `项目编号已存在：${archiveDup.project_name || projectNo}` });
+    }
+
+    dao.updateProject(project.id, {
+      project_no: projectNo,
+      updated_by: userId,
+      updated_by_name: req.user?.name || ''
+    });
+
+    syncMergedProjectNo(project.id, projectNo);
+    archiveDao.updateProjectNumber(project.id, projectNo);
+
+    // 手工输入招标编号时抬高流水，避免后续自动编号重号
+    const matched = projectNo.match(/^ZEC-Z(\d{2})[GHF]-(\d{3})$/i);
+    if (matched) {
+      archiveDao.ensureProjectNoSeqAtLeast(matched[1], Number(matched[2]));
+    }
+
+    const enriched = dao.getProjectWithDepartment(project.id);
+    try {
+      const archive = archiveDao.getArchive(project.id);
+      if (archive) enriched.archive_seq_no = archive.seq_no;
+    } catch {
+      /* 归档表尚未创建时忽略 */
+    }
+    res.json(enriched);
+  } catch (error) {
+    console.error('[修改项目编号] 失败:', error.message);
     res.status(500).json({ error: error.message });
   }
 }
@@ -754,6 +889,7 @@ module.exports = {
   createProject,
   getProject,
   updateProject,
+  updateProjectNo,
   listProjectFiles,
   getMergedData,
   saveMergedData,

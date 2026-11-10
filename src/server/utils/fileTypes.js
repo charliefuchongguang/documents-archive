@@ -47,11 +47,6 @@ const STORE_ONLY_DOC_TYPES = [
   'cost_application',
   'cost_implementation',
   'cost_task_book',
-  'cost_raw_material',
-  'cost_result',
-  'cost_process',
-  'cost_evaluation',
-  'cost_return_visit',
   'cost_other_attach'
 ];
 
